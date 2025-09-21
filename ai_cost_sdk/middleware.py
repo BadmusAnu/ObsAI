@@ -8,6 +8,7 @@ import time
 
 from opentelemetry import trace
 
+from .config import load_config, Config
 from .metrics import (
     AGENT_COST, AGENT_LATENCY, LLM_REQUESTS, LLM_TOKENS, AGENT_REQUESTS,
     LLM_COST_PER_REQUEST, AGENT_COST_PER_REQUEST, LLM_LATENCY, RAG_LATENCY, 
@@ -30,6 +31,22 @@ _tenant: contextvars.ContextVar[str] = contextvars.ContextVar("tenant", default=
 _route: contextvars.ContextVar[str] = contextvars.ContextVar("route", default="")
 _request_count: contextvars.ContextVar[int] = contextvars.ContextVar("request_count", default=0)
 
+# Cache config to avoid repeated loading
+_config_cache: Config | None = None
+
+
+def _get_config() -> Config:
+    """Get cached config or load it."""
+    global _config_cache
+    if _config_cache is None:
+        _config_cache = load_config()
+    return _config_cache
+
+
+def _is_sdk_enabled() -> bool:
+    """Check if SDK is enabled."""
+    return _get_config().sdk_enabled
+
 
 def _add_cost(cost: float, model: str | None, component: str, vendor: str = "unknown") -> None:
     total = _turn_cost.get()
@@ -45,6 +62,11 @@ def _add_cost(cost: float, model: str | None, component: str, vendor: str = "unk
 
 @contextmanager
 def agent_turn(tenant_id: str, route: str):
+    # Check if SDK is enabled - if not, provide no-op context manager
+    if not _is_sdk_enabled():
+        yield None
+        return
+    
     tracer = trace.get_tracer("ai_cost_sdk")
     start = time.time()
     
@@ -103,6 +125,11 @@ def agent_turn(tenant_id: str, route: str):
 
 @contextmanager
 def llm_call(model: str, vendor: str, usage: dict | None = None, prompt: str | None = None):
+    # Check if SDK is enabled - if not, provide no-op context manager
+    if not _is_sdk_enabled():
+        yield None
+        return
+    
     tracer = trace.get_tracer("ai_cost_sdk")
     usage = usage if usage is not None else {}
     start = time.time()
@@ -173,6 +200,11 @@ def llm_call(model: str, vendor: str, usage: dict | None = None, prompt: str | N
 
 @contextmanager
 def rag_embed(model: str, vendor: str, tokens: int, texts: list[str] | None = None):
+    # Check if SDK is enabled - if not, provide no-op context manager
+    if not _is_sdk_enabled():
+        yield None
+        return
+    
     tracer = trace.get_tracer("ai_cost_sdk")
     start = time.time()
     
@@ -215,6 +247,11 @@ def rag_search(
     price_per_unit: float = 0.0,
     vendor: str = "vector_db",
 ):
+    # Check if SDK is enabled - if not, provide no-op context manager
+    if not _is_sdk_enabled():
+        yield None
+        return
+    
     tracer = trace.get_tracer("ai_cost_sdk")
     start = time.time()
     
@@ -247,6 +284,11 @@ def rag_search(
 
 @contextmanager
 def tool_call(name: str, vendor: str | None = None, unit_price: float | None = None):
+    # Check if SDK is enabled - if not, provide no-op context manager
+    if not _is_sdk_enabled():
+        yield None
+        return
+    
     tracer = trace.get_tracer("ai_cost_sdk")
     start = time.time()
     vendor = vendor or "unknown"

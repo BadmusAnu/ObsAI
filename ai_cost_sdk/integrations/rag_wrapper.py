@@ -38,4 +38,9 @@ def vector_search(
         vendor=vendor
     ):
         # Placeholder search - replace with actual vector search logic
+        # In a real implementation, you would:
+        # 1. Perform the actual vector search
+        # 2. Calculate actual read_units based on search results
+        # 3. Get actual price_per_unit from your vector DB pricing
+        # For now, we'll use the provided values
         return [f"doc-{i}" for i in range(k)]

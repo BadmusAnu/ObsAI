@@ -110,9 +110,10 @@ Automatic cost calculation for all AI operations:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SDK_ENABLED` | `true` | Enable/disable the SDK |
-| `TENANT_ID` | `""` | Tenant identifier |
-| `PROJECT_ID` | `""` | Project identifier |
+| `TENANT_ID` | `""` | Tenant identifier (required when SDK enabled) |
+| `PROJECT_ID` | `""` | Project identifier (required when SDK enabled) |
 | `ROUTE` | `"default"` | Route name for grouping |
+| `SERVICE_NAME` | `"ai-cost-sdk"` | Service name for OpenTelemetry resource |
 | `EXPORT_OTLP_ENDPOINT` | `None` | OTLP endpoint for traces |
 | `EXPORT_JSON_PATH` | `None` | Local JSON file for traces |
 | `PRICING_SNAPSHOT` | `"openai-2025-09"` | Pricing data version |
@@ -129,6 +130,7 @@ config = Config(
     tenant_id="my-tenant",
     project_id="my-project",
     route="production",
+    service_name="my-ai-service",
     export_otlp_endpoint="https://api.honeycomb.io/v1/traces",
     pricing_snapshot="openai-2025-09",
     redact_prompts=True,

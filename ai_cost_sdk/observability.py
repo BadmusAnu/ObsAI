@@ -20,7 +20,7 @@ from . import __version__
 def setup_tracer(config: Config) -> trace.Tracer:
     resource = Resource(
         {
-            "service.name": "ai-cost-sdk",
+            "service.name": config.service_name,
             "tenant.id": config.tenant_id,
             "project.id": config.project_id,
             "route.name": config.route,
