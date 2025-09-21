@@ -16,11 +16,11 @@ from .metrics import (
     ACTIVE_REQUESTS, QUEUE_SIZE
 )
 from .pricing_calc import (
-    PRICING_SNAPSHOT_ID,
     embedding_cost,
     llm_cost,
     rag_search_cost,
     tool_cost,
+    get_pricing_snapshot_id,
 )
 from .tokenizer import count_tokens, get_model_vendor
 
@@ -76,7 +76,7 @@ def agent_turn(tenant_id: str, route: str):
     with tracer.start_as_current_span("gateway.request") as span:
         span.set_attribute("tenant.id", tenant_id)
         span.set_attribute("route.name", route)
-        span.set_attribute("pricing_snapshot_id", PRICING_SNAPSHOT_ID)
+        span.set_attribute("pricing_snapshot_id", get_pricing_snapshot_id())
         token_c = _turn_cost.set(0.0)
         token_t = _tenant.set(tenant_id)
         token_r = _route.set(route)
@@ -141,7 +141,7 @@ def llm_call(model: str, vendor: str, usage: dict | None = None, prompt: str | N
     with tracer.start_as_current_span("llm.call") as span:
         span.set_attribute("ai.model.id", model)
         span.set_attribute("ai.vendor", vendor)
-        span.set_attribute("pricing_snapshot_id", PRICING_SNAPSHOT_ID)
+        span.set_attribute("pricing_snapshot_id", get_pricing_snapshot_id())
         
         try:
             yield span
@@ -173,7 +173,7 @@ def llm_call(model: str, vendor: str, usage: dict | None = None, prompt: str | N
                 span.set_attribute("ai.tokens.cached", cached_t)
             
             # Calculate cost and update metrics
-            cost = llm_cost(model, in_t, out_t, cached_t)
+            cost = llm_cost(model, in_t, out_t, cached_t, vendor)
             span.set_attribute("cost.usd.total", cost)
             _add_cost(cost, model, "llm", vendor)
             
@@ -216,7 +216,7 @@ def rag_embed(model: str, vendor: str, tokens: int, texts: list[str] | None = No
         span.set_attribute("ai.model.id", model)
         span.set_attribute("ai.vendor", vendor)
         span.set_attribute("ai.tokens.input", tokens)
-        span.set_attribute("pricing_snapshot_id", PRICING_SNAPSHOT_ID)
+        span.set_attribute("pricing_snapshot_id", get_pricing_snapshot_id())
         
         try:
             yield span
@@ -260,7 +260,7 @@ def rag_search(
         span.set_attribute("rag.index.version", index_version)
         span.set_attribute("rag.k", k)
         span.set_attribute("rag.freshness_s", freshness_s)
-        span.set_attribute("pricing_snapshot_id", PRICING_SNAPSHOT_ID)
+        span.set_attribute("pricing_snapshot_id", get_pricing_snapshot_id())
         span.set_attribute("ai.vendor", vendor)
         
         try:
@@ -296,7 +296,7 @@ def tool_call(name: str, vendor: str | None = None, unit_price: float | None = N
     with tracer.start_as_current_span("tool.call") as span:
         span.set_attribute("tool.name", name)
         span.set_attribute("ai.vendor", vendor)
-        span.set_attribute("pricing_snapshot_id", PRICING_SNAPSHOT_ID)
+        span.set_attribute("pricing_snapshot_id", get_pricing_snapshot_id())
         
         try:
             yield span

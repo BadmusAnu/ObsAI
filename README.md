@@ -73,15 +73,17 @@ export EXPORT_JSON_PATH="/path/to/telemetry.json"
 
 ### 1. Multi-Vendor LLM Support
 
-The SDK supports multiple LLM vendors with accurate tokenization:
+The SDK supports multiple LLM vendors with accurate tokenization and cost tracking:
 
 - **OpenAI**: GPT-4o, GPT-4o-mini, GPT-4, GPT-3.5-turbo, embeddings
 - **Claude**: Claude-3.5-Sonnet, Claude-3.5-Haiku, Claude-3 models
 - **Gemini**: Gemini-Pro, Gemini-1.5-Pro, Gemini-1.5-Flash
 
+All vendors include accurate pricing data for proper cost calculation across different model tiers.
+
 ### 2. Accurate Token Counting
 
-Uses proper tokenizers for each vendor:
+Uses proper tokenizers for each vendor with intelligent fallback:
 
 ```python
 from ai_cost_sdk.tokenizer import count_tokens, count_tokens_batch
@@ -94,14 +96,22 @@ texts = ["Text 1", "Text 2", "Text 3"]
 total_tokens = count_tokens_batch(texts, "gpt-4o", "openai")
 ```
 
+**Fallback Strategy**: When tiktoken is unavailable, the SDK uses a hybrid approach:
+- Very short texts (1-3 words): 1 token per word
+- Short texts (4-10 words): ~1.2 tokens per word  
+- Long texts (10+ words): Character-based estimation
+- Ensures short prompts are never counted as 0 tokens
+
 ### 3. Cost Tracking
 
 Automatic cost calculation for all AI operations:
 
-- LLM calls (input/output/cached tokens)
+- LLM calls (input/output/cached tokens) with multi-vendor pricing
 - Embeddings
 - RAG operations
 - Custom tools
+
+The SDK includes comprehensive pricing data for OpenAI, Claude, and Gemini models, ensuring accurate cost tracking across all supported vendors. Pricing data is loaded dynamically based on the `PRICING_SNAPSHOT` configuration, allowing you to use different pricing versions as needed.
 
 ## Configuration
 
@@ -116,7 +126,7 @@ Automatic cost calculation for all AI operations:
 | `SERVICE_NAME` | `"ai-cost-sdk"` | Service name for OpenTelemetry resource |
 | `EXPORT_OTLP_ENDPOINT` | `None` | OTLP endpoint for traces |
 | `EXPORT_JSON_PATH` | `None` | Local JSON file for traces |
-| `PRICING_SNAPSHOT` | `"openai-2025-09"` | Pricing data version |
+| `PRICING_SNAPSHOT` | `"openai-2025-09"` | Pricing data version (dynamically loaded) |
 | `REDACT_PROMPTS` | `true` | Redact sensitive prompt data |
 | `TOKENIZE_FALLBACK` | `false` | Use fallback tokenization |
 

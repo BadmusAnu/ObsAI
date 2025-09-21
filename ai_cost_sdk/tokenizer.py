@@ -44,16 +44,40 @@ GEMINI_MODEL_PATTERNS = {
 def count_tokens_openai(text: str, model: str) -> int:
     """Count tokens for OpenAI models using tiktoken."""
     if not TIKTOKEN_AVAILABLE:
-        # Fallback to character-based estimation
-        return len(text) // 4
+        # Hybrid fallback approach: word-based for short texts, character-based for long texts
+        words = re.findall(r'\S+', text)
+        if not words:
+            return 0
+        
+        if len(words) <= 3:
+            # Very short texts: usually 1 token per word
+            return len(words)
+        elif len(words) <= 10:
+            # Short texts: ~1.2 tokens per word
+            return max(1, int(len(words) * 1.2))
+        else:
+            # Long texts: character-based estimation
+            return max(1, len(text) // 4)
     
     encoding_name = OPENAI_MODEL_ENCODINGS.get(model, "cl100k_base")
     try:
         encoding = tiktoken.get_encoding(encoding_name)
         return len(encoding.encode(text))
     except Exception:
-        # Fallback to character-based estimation
-        return len(text) // 4
+        # Fallback to hybrid approach when tiktoken fails
+        words = re.findall(r'\S+', text)
+        if not words:
+            return 0
+        
+        if len(words) <= 3:
+            # Very short texts: usually 1 token per word
+            return len(words)
+        elif len(words) <= 10:
+            # Short texts: ~1.2 tokens per word
+            return max(1, int(len(words) * 1.2))
+        else:
+            # Long texts: character-based estimation
+            return max(1, len(text) // 4)
 
 
 def count_tokens_claude(text: str, model: str) -> int:
