@@ -1,3 +1,4 @@
+import contextlib
 from types import SimpleNamespace
 
 from opentelemetry import trace
@@ -45,6 +46,50 @@ def test_openai_wrapper_sets_attrs():
     assert llm.attributes["ai.tokens.input"] == 5
     assert llm.attributes["ai.tokens.output"] == 7
     assert llm.attributes["cost.usd.total"] > 0
+
+
+def test_openai_wrapper_normalizes_segmented_content(monkeypatch):
+    captured = {}
+
+    @contextlib.contextmanager
+    def fake_llm_call(*, model, vendor, usage, prompt):
+        captured["model"] = model
+        captured["vendor"] = vendor
+        captured["prompt"] = prompt
+        yield SimpleNamespace()
+
+    monkeypatch.setattr(
+        "ai_cost_sdk.integrations.openai_wrapper.middleware.llm_call",
+        fake_llm_call,
+    )
+
+    client = Client()
+    messages = [
+        {
+            "role": "system",
+            "content": [
+                {"type": "text", "text": "System guidance."},
+                {"type": "image_url", "image_url": {"url": "http://example.com"}},
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "Hello"},
+                {"type": "text", "text": "world"},
+                "How are you?",
+                None,
+                {"type": "tool_result", "content": [{"type": "text", "text": "tool says hi"}]},
+                123,
+            ],
+        },
+    ]
+
+    chat_completion(client, model="gpt-4o", messages=messages)
+
+    assert captured["model"] == "gpt-4o"
+    assert captured["vendor"] == "openai"
+    assert captured["prompt"] == "System guidance. Hello world How are you? tool says hi 123"
 
 
 def test_rag_wrapper_embed():

@@ -28,16 +28,29 @@ def _resolve_pricing_snapshot() -> str:
         return os.getenv("PRICING_SNAPSHOT", _DEFAULT_PRICING_SNAPSHOT)
 
 
+def _resolve_pricing_snapshot() -> str:
+    """Return the pricing snapshot ID without enforcing tenant/project config."""
+
+    try:
+        config = load_config()
+    except ValueError:
+        # When tenant/project values are missing we still want pricing helpers to
+        # operate. Fall back to reading the snapshot directly from the
+        # environment, mirroring the default used by ``load_config``.
+        return os.getenv("PRICING_SNAPSHOT", "openai-2025-09")
+
+    return config.pricing_snapshot
+
+
 def _get_pricing_data():
     """Get pricing data, loading from config if needed."""
+
     global _pricing_cache, _current_snapshot, PRICING_SNAPSHOT_ID
 
     snapshot_id = _resolve_pricing_snapshot()
     if _current_snapshot != snapshot_id or not _pricing_cache:
         _pricing_cache, _current_snapshot = load_pricing(snapshot_id)
         PRICING_SNAPSHOT_ID = _current_snapshot
-
-    return _pricing_cache, _current_snapshot
 
 
 def llm_cost(

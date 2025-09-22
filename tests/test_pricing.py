@@ -62,7 +62,6 @@ def test_pricing_cache_switches_snapshots(monkeypatch):
     monkeypatch.setenv("PRICING_SNAPSHOT", "second")
     second_cost = pricing_calc.llm_cost("gpt-test", in_tokens=1000)
     assert pricing_calc.PRICING_SNAPSHOT_ID == "second"
-
     assert first_cost == 0.001
     assert second_cost == 0.01
     assert second_cost != first_cost
