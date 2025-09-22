@@ -105,6 +105,8 @@ def chat_completion(client, **kwargs):
     ):
         response = client.chat.completions.create(**kwargs)
         resp_usage = getattr(response, "usage", {}) or {}
+        if hasattr(resp_usage, "model_dump") and callable(resp_usage.model_dump):
+            resp_usage = resp_usage.model_dump()
         usage.update(resp_usage)
 
         # If TOKENIZE_FALLBACK is enabled and usage data is missing, calculate tokens

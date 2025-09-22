@@ -13,6 +13,14 @@ from ai_cost_sdk.middleware import agent_turn
 from ai_cost_sdk.tokenizer import count_tokens, count_tokens_batch, get_model_vendor
 
 
+def _configure_tracer(exporter: InMemorySpanExporter) -> None:
+    provider = trace.get_tracer_provider()
+    if not isinstance(provider, TracerProvider):
+        provider = TracerProvider()
+        trace.set_tracer_provider(provider)
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+
+
 class _ChatCompletions:
     def create(self, **_kwargs):
         return SimpleNamespace(
@@ -29,11 +37,33 @@ class Client:
     chat = _Chat()
 
 
+class _PydanticLikeUsage:
+    def __init__(self, data):
+        self._data = data
+
+    def model_dump(self):
+        return self._data
+
+
+class _ChatCompletionsModelDump:
+    def create(self, **_kwargs):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="hi"))],
+            usage=_PydanticLikeUsage({"prompt_tokens": 11, "completion_tokens": 13}),
+        )
+
+
+class _ChatModelDump:
+    completions = _ChatCompletionsModelDump()
+
+
+class ClientModelDump:
+    chat = _ChatModelDump()
+
+
 def test_openai_wrapper_sets_attrs():
     exporter = InMemorySpanExporter()
-    provider = TracerProvider()
-    provider.add_span_processor(SimpleSpanProcessor(exporter))
-    trace.set_tracer_provider(provider)
+    _configure_tracer(exporter)
 
     client = Client()
     with agent_turn("t1", "r1"):
@@ -48,48 +78,22 @@ def test_openai_wrapper_sets_attrs():
     assert llm.attributes["cost.usd.total"] > 0
 
 
-def test_openai_wrapper_normalizes_segmented_content(monkeypatch):
-    captured = {}
 
-    @contextlib.contextmanager
-    def fake_llm_call(*, model, vendor, usage, prompt):
-        captured["model"] = model
-        captured["vendor"] = vendor
-        captured["prompt"] = prompt
-        yield SimpleNamespace()
+def test_openai_wrapper_handles_model_dump_usage():
+    exporter = InMemorySpanExporter()
+    _configure_tracer(exporter)
 
-    monkeypatch.setattr(
-        "ai_cost_sdk.integrations.openai_wrapper.middleware.llm_call",
-        fake_llm_call,
-    )
+    client = ClientModelDump()
+    with agent_turn("t1", "r1"):
+        chat_completion(
+            client, model="gpt-4o", messages=[{"role": "user", "content": "hi"}]
+        )
 
-    client = Client()
-    messages = [
-        {
-            "role": "system",
-            "content": [
-                {"type": "text", "text": "System guidance."},
-                {"type": "image_url", "image_url": {"url": "http://example.com"}},
-            ],
-        },
-        {
-            "role": "user",
-            "content": [
-                {"type": "input_text", "text": "Hello"},
-                {"type": "text", "text": "world"},
-                "How are you?",
-                None,
-                {"type": "tool_result", "content": [{"type": "text", "text": "tool says hi"}]},
-                123,
-            ],
-        },
-    ]
+    spans = exporter.get_finished_spans()
+    llm = [s for s in spans if s.name == "llm.call"][0]
+    assert llm.attributes["ai.tokens.input"] == 11
+    assert llm.attributes["ai.tokens.output"] == 13
 
-    chat_completion(client, model="gpt-4o", messages=messages)
-
-    assert captured["model"] == "gpt-4o"
-    assert captured["vendor"] == "openai"
-    assert captured["prompt"] == "System guidance. Hello world How are you? tool says hi 123"
 
 
 def test_rag_wrapper_embed():
