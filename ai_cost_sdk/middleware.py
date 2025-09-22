@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import contextmanager
 import contextvars
 import time
@@ -243,8 +244,8 @@ def rag_search(
     index_version: str,
     k: int,
     freshness_s: int,
-    read_units: int = 0,
-    price_per_unit: float = 0.0,
+    read_units: int | Callable[[], int] = 0,
+    price_per_unit: float | Callable[[], float] = 0.0,
     vendor: str = "vector_db",
 ):
     # Check if SDK is enabled - if not, provide no-op context manager
@@ -272,9 +273,25 @@ def rag_search(
             end_time = time.time()
             latency = end_time - start
             latency_ms = latency * 1000
-            
+
+            def _resolve(value, default):
+                if callable(value):
+                    try:
+                        resolved = value()
+                    except Exception:  # pragma: no cover - defensive
+                        resolved = default
+                else:
+                    resolved = value
+                return default if resolved is None else resolved
+
+            resolved_read_units = _resolve(read_units, 0)
+            resolved_price_per_unit = _resolve(price_per_unit, 0.0)
+
             span.set_attribute("latency_ms", latency_ms)
-            cost = rag_search_cost(read_units, price_per_unit)
+            span.set_attribute("rag.read_units", resolved_read_units)
+            span.set_attribute("rag.price_per_unit", resolved_price_per_unit)
+
+            cost = rag_search_cost(resolved_read_units, resolved_price_per_unit)
             span.set_attribute("cost.usd.total", cost)
             _add_cost(cost, index_id, "rag_search", vendor)
             

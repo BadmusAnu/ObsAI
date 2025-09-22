@@ -41,6 +41,25 @@ class FakeClaudeClient:
         )
 
 
+class FakeVectorClient:
+    def query(self, **kwargs):
+        time.sleep(0.004)
+        top_k = kwargs.get("top_k") or kwargs.get("k") or 3
+        matches = [
+            {"id": "doc-1", "score": 0.92},
+            {"id": "doc-2", "score": 0.88},
+            {"id": "doc-3", "score": 0.83},
+            {"id": "doc-4", "score": 0.75},
+        ]
+        return {
+            "matches": matches[:top_k],
+            "usage": {"read_units": top_k, "price_per_unit": 0.0001},
+        }
+
+
+VECTOR_CLIENT = FakeVectorClient()
+
+
 @priced_tool("fake_crm", unit_price=0.002, vendor="crm-service")
 def call_crm():
     time.sleep(0.005)
@@ -98,13 +117,12 @@ def demonstrate_rag_operations():
     # Vector search
     with rag_embed(model="text-embedding-3-large", vendor="openai", texts=["search query"]):
         results = vector_search(
+            VECTOR_CLIENT,
             index_id="knowledge-base",
             query="What is machine learning?",
             k=3,
             index_version="v2.0",
             vendor="pinecone",
-            read_units=5,
-            price_per_unit=0.0001
         )
         print(f"Search results: {results}")
 
@@ -170,13 +188,12 @@ def demonstrate_agent_workflow():
         
         # 3. Search knowledge base
         kb_results = vector_search(
+            VECTOR_CLIENT,
             index_id="support-kb",
             query="order status tracking",
             k=2,
             index_version="v1.0",
             vendor="pinecone",
-            read_units=3,
-            price_per_unit=0.0001
         )
         print(f"Knowledge Base Results: {kb_results}")
         

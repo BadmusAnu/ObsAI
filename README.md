@@ -205,16 +205,22 @@ embeddings = embed(
 ```python
 from ai_cost_sdk.integrations.rag_wrapper import vector_search
 
+vector_client = ...  # Your vector store/search client instance
+
 results = vector_search(
+    vector_client,
     index_id="my-index",
     query="search query",
     k=5,
     index_version="v1.0",
     vendor="pinecone",
-    read_units=10,
-    price_per_unit=0.0001
 )
 ```
+
+The wrapper inspects the client's response for usage metadata (`read_units` and
+`price_per_unit`) to compute cost. When your vector store does not return
+pricing information, set the `VECTOR_SEARCH_PRICE_PER_UNIT` environment
+variable to provide a default unit price.
 
 ### 3. Custom Tools
 
@@ -239,7 +245,7 @@ with agent_turn(tenant_id="tenant-123", route="chat-api"):
     # Multiple AI operations within a single agent turn
     response = chat_completion(client, model="gpt-4o", messages=messages)
     embeddings = embed(documents, model="text-embedding-3-large")
-    results = vector_search("index", query, k=5, index_version="v1")
+    results = vector_search(vector_client, "index", query, k=5, index_version="v1")
     weather = get_weather("New York")
     
     # All costs are aggregated and tracked

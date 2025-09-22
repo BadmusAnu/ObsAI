@@ -11,7 +11,7 @@ license = {text = "MIT"}
 dependencies = [
     "opentelemetry-sdk",
     "opentelemetry-exporter-otlp",
-    "prometheus-client",
+    "prometheus-client<0.22",
 ]
 
 [project.optional-dependencies]

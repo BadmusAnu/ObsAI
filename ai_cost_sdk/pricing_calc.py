@@ -55,6 +55,7 @@ def llm_cost(
     cost = (in_tokens / 1000) * price_in + (out_tokens / 1000) * price_out
     if cached_tokens:
         cost -= (cached_tokens / 1000) * price_in
+        return cost
     return round(cost, 10)
 
 

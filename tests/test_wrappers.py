@@ -1,4 +1,7 @@
+import os
 from types import SimpleNamespace
+
+import pytest
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
@@ -10,6 +13,11 @@ from ai_cost_sdk.integrations.rag_wrapper import embed, vector_search
 from ai_cost_sdk.integrations.tools_wrapper import priced_tool
 from ai_cost_sdk.middleware import agent_turn
 from ai_cost_sdk.tokenizer import count_tokens, count_tokens_batch, get_model_vendor
+
+
+os.environ.setdefault("TENANT_ID", "test-tenant")
+os.environ.setdefault("PROJECT_ID", "test-project")
+os.environ.setdefault("SDK_ENABLED", "1")
 
 
 class _ChatCompletions:
@@ -28,11 +36,30 @@ class Client:
     chat = _Chat()
 
 
+class _VectorClient:
+    def __init__(self, matches, usage):
+        self._matches = matches
+        self._usage = usage
+        self.calls = []
+
+    def query(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"matches": self._matches, "usage": self._usage}
+
+
+def _configure_tracer(exporter):
+    provider = trace.get_tracer_provider()
+    if not isinstance(provider, TracerProvider):
+        provider = TracerProvider()
+        trace.set_tracer_provider(provider)
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    return provider
+
+
 def test_openai_wrapper_sets_attrs():
     exporter = InMemorySpanExporter()
-    provider = TracerProvider()
-    provider.add_span_processor(SimpleSpanProcessor(exporter))
-    trace.set_tracer_provider(provider)
+    _configure_tracer(exporter)
+    exporter.clear()
 
     client = Client()
     with agent_turn("t1", "r1"):
@@ -58,18 +85,67 @@ def test_rag_wrapper_embed():
 
 def test_rag_wrapper_search():
     """Test RAG search wrapper."""
+    client = _VectorClient(
+        matches=[{"id": "doc-1"}, {"id": "doc-2"}, {"id": "doc-3"}],
+        usage={"read_units": 3, "price_per_unit": 0.001},
+    )
+
     results = vector_search(
+        client,
         index_id="test-index",
         query="test query",
         k=3,
         index_version="v1.0",
         vendor="pinecone",
-        read_units=5,
-        price_per_unit=0.001
     )
-    
-    assert len(results) == 3
-    assert all(result.startswith("doc-") for result in results)
+
+    assert results == [{"id": "doc-1"}, {"id": "doc-2"}, {"id": "doc-3"}]
+    assert client.calls
+    call_kwargs = client.calls[0]
+    assert call_kwargs["index_id"] == "test-index"
+    assert call_kwargs["top_k"] == 3
+
+
+def test_vector_search_records_costs(monkeypatch):
+    """Vector search should capture usage metrics and pass through results."""
+
+    exporter = InMemorySpanExporter()
+    _configure_tracer(exporter)
+    exporter.clear()
+
+    monkeypatch.setenv("TENANT_ID", "tenant-1")
+    monkeypatch.setenv("PROJECT_ID", "project-1")
+    monkeypatch.setenv("SDK_ENABLED", "1")
+
+    import ai_cost_sdk.middleware as middleware_module
+
+    middleware_module._config_cache = None
+
+    client = _VectorClient(
+        matches=[{"id": "doc-1"}, {"id": "doc-2"}],
+        usage={"read_units": 7, "price_per_unit": 0.002},
+    )
+
+    with agent_turn("tenant-1", "route-1"):
+        results = vector_search(
+            client,
+            index_id="test-index",
+            query="hello world",
+            k=2,
+            index_version="v1.0",
+            vendor="pinecone",
+        )
+
+    assert results == [{"id": "doc-1"}, {"id": "doc-2"}]
+
+    spans = exporter.get_finished_spans()
+    rag_spans = [span for span in spans if span.name == "rag.search"]
+    assert rag_spans, "rag.search span not recorded"
+
+    span = rag_spans[0]
+    assert span.attributes["rag.read_units"] == 7
+    assert span.attributes["rag.price_per_unit"] == pytest.approx(0.002)
+    assert span.attributes["cost.usd.total"] == pytest.approx(0.014)
 
 
 def test_tool_wrapper():

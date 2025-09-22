@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tiktoken.core import Encoding
 
 try:
     import tiktoken
@@ -40,44 +43,53 @@ GEMINI_MODEL_PATTERNS = {
     "gemini-1.5-flash": r"\S+",
 }
 
+_ENCODING_CACHE: Dict[str, tuple["Encoding", int]] = {}
+
+
+def _get_tiktoken_encoding(name: str):
+    getter_id = id(getattr(tiktoken, "get_encoding", None))
+    cached = _ENCODING_CACHE.get(name)
+    if cached and cached[1] == getter_id:
+        return cached[0]
+
+    global TIKTOKEN_AVAILABLE
+    try:
+        encoding = tiktoken.get_encoding(name)
+    except Exception:
+        TIKTOKEN_AVAILABLE = False
+        raise
+
+    _ENCODING_CACHE[name] = (encoding, getter_id)
+    return encoding
+
+
+def _fallback_token_estimate(text: str) -> int:
+    words = text.split()
+    if not words:
+        return 0
+
+    char_estimate = max(1, (len(text) + 3) // 4)
+
+    if len(words) <= 3:
+        return max(len(words), char_estimate)
+    if len(words) <= 10:
+        word_estimate = max(1, int(len(words) * 1.2))
+        return max(char_estimate, word_estimate)
+    return char_estimate
+
 
 def count_tokens_openai(text: str, model: str) -> int:
     """Count tokens for OpenAI models using tiktoken."""
     if not TIKTOKEN_AVAILABLE:
-        # Hybrid fallback approach: word-based for short texts, character-based for long texts
-        words = re.findall(r'\S+', text)
-        if not words:
-            return 0
-        
-        if len(words) <= 3:
-            # Very short texts: usually 1 token per word
-            return len(words)
-        elif len(words) <= 10:
-            # Short texts: ~1.2 tokens per word
-            return max(1, int(len(words) * 1.2))
-        else:
-            # Long texts: character-based estimation
-            return max(1, (len(text) + 3) // 4)
+        return _fallback_token_estimate(text)
     
     encoding_name = OPENAI_MODEL_ENCODINGS.get(model, "cl100k_base")
     try:
-        encoding = tiktoken.get_encoding(encoding_name)
+        encoding = _get_tiktoken_encoding(encoding_name)
         return len(encoding.encode(text))
     except Exception:
         # Fallback to hybrid approach when tiktoken fails
-        words = re.findall(r'\S+', text)
-        if not words:
-            return 0
-        
-        if len(words) <= 3:
-            # Very short texts: usually 1 token per word
-            return len(words)
-        elif len(words) <= 10:
-            # Short texts: ~1.2 tokens per word
-            return max(1, int(len(words) * 1.2))
-        else:
-            # Long texts: character-based estimation
-            return max(1, (len(text) + 3) // 4)
+        return _fallback_token_estimate(text)
 
 
 def count_tokens_claude(text: str, model: str) -> int:
@@ -135,6 +147,25 @@ def count_tokens_batch(texts: List[str], model: str, vendor: str = "openai") -> 
     Returns:
         Total number of tokens across all texts
     """
+    if not texts:
+        return 0
+
+    vendor = vendor.lower()
+
+    use_native_batch = (
+        vendor == "openai"
+        and TIKTOKEN_AVAILABLE
+        and getattr(count_tokens, "__module__", "") == __name__
+    )
+
+    if use_native_batch:
+        encoding_name = OPENAI_MODEL_ENCODINGS.get(model, "cl100k_base")
+        try:
+            encoding = _get_tiktoken_encoding(encoding_name)
+        except Exception:
+            return sum(count_tokens(text, model, vendor) for text in texts)
+        return sum(len(tokens) for tokens in encoding.encode_batch(texts))
+
     return sum(count_tokens(text, model, vendor) for text in texts)
 
 

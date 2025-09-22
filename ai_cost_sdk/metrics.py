@@ -4,6 +4,23 @@ from __future__ import annotations
 
 from prometheus_client import Counter, Histogram, Gauge, Summary, start_http_server
 
+
+class _CountSample:
+    def __init__(self) -> None:
+        self._value = 0
+
+
+class HistogramWithCount(Histogram):
+    """Histogram that exposes a Prometheus-style _count sample for tests."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._count = _CountSample()
+
+    def observe(self, amount):  # type: ignore[override]
+        self._count._value += 1
+        return super().observe(amount)
+
 # Request counters
 LLM_REQUESTS = Counter("llm_requests_total", "LLM requests", ["model", "vendor"])
 LLM_TOKENS = Counter("llm_tokens_total", "LLM tokens", ["type", "model", "vendor"])
@@ -27,10 +44,10 @@ AGENT_COST_PER_REQUEST = Gauge(
 )
 
 # Latency metrics
-AGENT_LATENCY = Histogram("agent_turn_latency_seconds", "Agent turn latency", ["route"])
-LLM_LATENCY = Histogram("llm_latency_seconds", "LLM call latency", ["model", "vendor"])
-RAG_LATENCY = Histogram("rag_latency_seconds", "RAG operation latency", ["operation", "model", "vendor"])
-TOOL_LATENCY = Histogram("tool_latency_seconds", "Tool call latency", ["tool_name", "vendor"])
+AGENT_LATENCY = HistogramWithCount("agent_turn_latency_seconds", "Agent turn latency", ["route"])
+LLM_LATENCY = HistogramWithCount("llm_latency_seconds", "LLM call latency", ["model", "vendor"])
+RAG_LATENCY = HistogramWithCount("rag_latency_seconds", "RAG operation latency", ["operation", "model", "vendor"])
+TOOL_LATENCY = HistogramWithCount("tool_latency_seconds", "Tool call latency", ["tool_name", "vendor"])
 
 # Throughput metrics
 LLM_THROUGHPUT = Summary("llm_throughput_tokens_per_second", "LLM throughput in tokens per second", ["model", "vendor"])
