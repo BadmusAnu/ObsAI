@@ -55,14 +55,21 @@ def test_count_tokens():
     # Test Gemini
     tokens = count_tokens("Hello world", "gemini-pro", "gemini")
     assert tokens == 2  # 2 words
-    
+
     # Test unknown vendor (fallback)
     tokens = count_tokens("Hello world", "unknown-model", "unknown")
-    assert tokens == 3  # len("Hello world") // 4 = 2, but fallback might be different
-    
+    assert tokens == 3  # Ceiling fallback estimates 3 tokens for 11 characters
+
     # Test empty text
     tokens = count_tokens("", "gpt-4o", "openai")
     assert tokens == 0
+
+
+def test_unknown_vendor_short_prompt_has_tokens():
+    """Short prompts for unknown vendors should still count tokens."""
+
+    tokens = count_tokens("Hi", "custom-model", "unknown")
+    assert tokens > 0
 
 
 def test_count_tokens_batch():
@@ -162,4 +169,4 @@ def test_tiktoken_fallback():
         with patch('ai_cost_sdk.tokenizer.tiktoken.get_encoding', side_effect=Exception("Tiktoken error")):
             tokens = count_tokens_openai("Hello world", "gpt-4o")
             # Should fallback to character-based estimation
-            assert tokens == 3  # len("Hello world") // 4 = 2, but fallback might be different
+            assert tokens == 3  # Ceiling fallback estimates 3 tokens for 11 characters
