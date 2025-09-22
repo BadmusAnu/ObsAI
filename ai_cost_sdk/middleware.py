@@ -262,7 +262,11 @@ def rag_search(
         span.set_attribute("rag.freshness_s", freshness_s)
         span.set_attribute("pricing_snapshot_id", get_pricing_snapshot_id())
         span.set_attribute("ai.vendor", vendor)
-        
+        span.set_attribute("rag.read_units", read_units)
+        span.set_attribute("rag.price_per_unit", price_per_unit)
+        setattr(span, "_rag_read_units", read_units)
+        setattr(span, "_rag_price_per_unit", price_per_unit)
+
         try:
             yield span
         except Exception as exc:  # pragma: no cover - passthrough
@@ -272,12 +276,23 @@ def rag_search(
             end_time = time.time()
             latency = end_time - start
             latency_ms = latency * 1000
-            
+
             span.set_attribute("latency_ms", latency_ms)
-            cost = rag_search_cost(read_units, price_per_unit)
+            final_read_units = getattr(span, "_rag_read_units", read_units)
+            final_price_per_unit = getattr(span, "_rag_price_per_unit", price_per_unit)
+
+            if final_read_units is None:
+                final_read_units = read_units
+            if final_price_per_unit is None:
+                final_price_per_unit = price_per_unit
+
+            span.set_attribute("rag.read_units", final_read_units)
+            span.set_attribute("rag.price_per_unit", final_price_per_unit)
+
+            cost = rag_search_cost(float(final_read_units or 0), float(final_price_per_unit or 0))
             span.set_attribute("cost.usd.total", cost)
             _add_cost(cost, index_id, "rag_search", vendor)
-            
+
             # Update RAG latency metrics
             RAG_LATENCY.labels(operation="search", model=index_id, vendor=vendor).observe(latency)
 
