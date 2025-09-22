@@ -1,6 +1,6 @@
 from ai_cost_sdk.pricing_calc import (
-    PRICING_SNAPSHOT_ID,
     embedding_cost,
+    get_pricing_snapshot_id,
     llm_cost,
     rag_search_cost,
     tool_cost,
@@ -8,7 +8,7 @@ from ai_cost_sdk.pricing_calc import (
 
 
 def test_llm_cost_and_snapshot():
-    assert PRICING_SNAPSHOT_ID == "openai-2025-09"
+    assert get_pricing_snapshot_id() == "openai-2025-09"
     cost = llm_cost("gpt-4o", in_tokens=1000, out_tokens=1000)
     assert cost == 0.0125
 
