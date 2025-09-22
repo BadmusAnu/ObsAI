@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import contextvars
+import os
 import time
 
 from opentelemetry import trace
@@ -35,11 +36,40 @@ _request_count: contextvars.ContextVar[int] = contextvars.ContextVar("request_co
 _config_cache: Config | None = None
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    """Parse boolean environment variables with sensible defaults."""
+
+    val = os.getenv(name)
+    if val is None:
+        return default
+    return val.lower() in {"1", "true", "yes", "on"}
+
+
+def _load_config_with_fallback() -> Config:
+    """Load configuration but tolerate missing tenant/project IDs."""
+
+    try:
+        return load_config()
+    except ValueError:
+        return Config(
+            sdk_enabled=_env_bool("SDK_ENABLED", True),
+            tenant_id=os.getenv("TENANT_ID", ""),
+            project_id=os.getenv("PROJECT_ID", ""),
+            route=os.getenv("ROUTE", "default"),
+            export_otlp_endpoint=os.getenv("EXPORT_OTLP_ENDPOINT"),
+            export_json_path=os.getenv("EXPORT_JSON_PATH"),
+            pricing_snapshot=os.getenv("PRICING_SNAPSHOT", "openai-2025-09"),
+            redact_prompts=_env_bool("REDACT_PROMPTS", True),
+            tokenize_fallback=_env_bool("TOKENIZE_FALLBACK", False),
+            service_name=os.getenv("SERVICE_NAME", "ai-cost-sdk"),
+        )
+
+
 def _get_config() -> Config:
     """Get cached config or load it."""
     global _config_cache
     if _config_cache is None:
-        _config_cache = load_config()
+        _config_cache = _load_config_with_fallback()
     return _config_cache
 
 

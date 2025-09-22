@@ -25,6 +25,9 @@ class Config:
     redact_prompts: bool
     tokenize_fallback: bool
     service_name: str
+    embedding_api_key: str | None = None
+    embedding_model: str | None = None
+    embedding_batch_size: int | None = None
 
 
 def load_config() -> Config:
@@ -51,4 +54,9 @@ def load_config() -> Config:
         redact_prompts=_get_bool("REDACT_PROMPTS", True),
         tokenize_fallback=_get_bool("TOKENIZE_FALLBACK", False),
         service_name=os.getenv("SERVICE_NAME", "ai-cost-sdk"),
+        embedding_api_key=os.getenv("EMBEDDING_API_KEY"),
+        embedding_model=os.getenv("EMBEDDING_MODEL"),
+        embedding_batch_size=(
+            int(batch_size) if (batch_size := os.getenv("EMBEDDING_BATCH_SIZE")) else None
+        ),
     )

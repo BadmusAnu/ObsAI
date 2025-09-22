@@ -1,9 +1,11 @@
+
 import os
 
 os.environ.setdefault("SDK_ENABLED", "1")
 os.environ.setdefault("TENANT_ID", "test-tenant")
 os.environ.setdefault("PROJECT_ID", "test-project")
 
+import contextlib
 from types import SimpleNamespace
 
 from opentelemetry import trace
@@ -18,10 +20,28 @@ from ai_cost_sdk.middleware import agent_turn
 from ai_cost_sdk.tokenizer import count_tokens, count_tokens_batch, get_model_vendor
 
 
+
 TEST_EXPORTER = InMemorySpanExporter()
 TEST_PROVIDER = TracerProvider()
 TEST_PROVIDER.add_span_processor(SimpleSpanProcessor(TEST_EXPORTER))
 trace.set_tracer_provider(TEST_PROVIDER)
+
+
+os.environ.setdefault("TENANT_ID", "test-tenant")
+os.environ.setdefault("PROJECT_ID", "test-project")
+
+
+_EXPORTER = InMemorySpanExporter()
+_PROVIDER = TracerProvider()
+_PROVIDER.add_span_processor(SimpleSpanProcessor(_EXPORTER))
+trace.set_tracer_provider(_PROVIDER)
+def _configure_tracer(exporter: InMemorySpanExporter) -> None:
+    provider = trace.get_tracer_provider()
+    if not isinstance(provider, TracerProvider):
+        provider = TracerProvider()
+        trace.set_tracer_provider(provider)
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+
 
 
 class _ChatCompletions:
@@ -38,6 +58,7 @@ class _Chat:
 
 class Client:
     chat = _Chat()
+
 
 
 class _FakeEmbedder:
@@ -80,17 +101,91 @@ class _FakeVectorClient:
 def test_openai_wrapper_sets_attrs():
     TEST_EXPORTER.clear()
 
+
+class _EmbeddingsAPI:
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def create(self, *, model: str, input: list[str], **_kwargs):
+        self.calls.append({"model": model, "input": input})
+        data = []
+        for text in input:
+            base = float(len(text))
+            data.append(
+                SimpleNamespace(
+                    embedding=[base, base + 0.1, base + 0.2]
+                )
+            )
+        return SimpleNamespace(data=data)
+
+
+class FakeEmbeddingClient:
+    def __init__(self):
+        self.embeddings = _EmbeddingsAPI()
+
+
+def test_openai_wrapper_sets_attrs():
+    _EXPORTER.clear()
+
+class _PydanticLikeUsage:
+    def __init__(self, data):
+        self._data = data
+
+    def model_dump(self):
+        return self._data
+
+
+class _ChatCompletionsModelDump:
+    def create(self, **_kwargs):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="hi"))],
+            usage=_PydanticLikeUsage({"prompt_tokens": 11, "completion_tokens": 13}),
+        )
+
+
+class _ChatModelDump:
+    completions = _ChatCompletionsModelDump()
+
+
+class ClientModelDump:
+    chat = _ChatModelDump()
+
+
+def test_openai_wrapper_sets_attrs():
+    exporter = InMemorySpanExporter()
+    _configure_tracer(exporter)
+
+
     client = Client()
     with agent_turn("t1", "r1"):
         chat_completion(
             client, model="gpt-4o", messages=[{"role": "user", "content": "hi"}]
         )
 
+
     spans = TEST_EXPORTER.get_finished_spans()
     llm = [s for s in spans if s.name == "llm.call"][0]
     assert llm.attributes["ai.tokens.input"] == 5
     assert llm.attributes["ai.tokens.output"] == 7
     assert llm.attributes["cost.usd.total"] > 0
+
+
+
+def test_openai_wrapper_handles_model_dump_usage():
+    exporter = InMemorySpanExporter()
+    _configure_tracer(exporter)
+
+    client = ClientModelDump()
+    with agent_turn("t1", "r1"):
+        chat_completion(
+            client, model="gpt-4o", messages=[{"role": "user", "content": "hi"}]
+        )
+
+    spans = exporter.get_finished_spans()
+    llm = [s for s in spans if s.name == "llm.call"][0]
+    assert llm.attributes["ai.tokens.input"] == 11
+    assert llm.attributes["ai.tokens.output"] == 13
+
 
 
 def test_rag_wrapper_embed():
@@ -104,6 +199,7 @@ def test_rag_wrapper_embed():
         texts,
         model="text-embedding-3-large",
         vendor="openai",
+
         embedder=fake_embedder,
     )
 
@@ -114,6 +210,28 @@ def test_rag_wrapper_embed():
     rag_embed_spans = [s for s in spans if s.name == "rag.embed"]
     assert rag_embed_spans
     assert rag_embed_spans[0].attributes["rag.embedding.count"] == 2
+
+        client=client,
+        batch_size=1,
+    )
+
+    expected = [
+        [float(len(text)), float(len(text)) + 0.1, float(len(text)) + 0.2]
+        for text in texts
+    ]
+
+    assert embeddings == expected
+    assert len(client.embeddings.calls) == 2  # batched to single item per call
+
+    spans = _EXPORTER.get_finished_spans()
+    rag_spans = [s for s in spans if s.name == "rag.embed"]
+    assert len(rag_spans) == 1
+    rag_span = rag_spans[0]
+
+    expected_tokens = count_tokens_batch(texts, "text-embedding-3-large", "openai")
+    assert rag_span.attributes["ai.tokens.input"] == expected_tokens
+    assert rag_span.attributes["cost.usd.total"] > 0
+
 
 
 def test_rag_wrapper_search():
