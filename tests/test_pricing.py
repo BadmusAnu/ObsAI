@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from ai_cost_sdk import pricing_calc
@@ -7,9 +9,15 @@ from ai_cost_sdk import pricing_calc
 def clear_pricing_cache():
     pricing_calc._pricing_cache = {}
     pricing_calc._current_snapshot = ""
+    pricing_calc.PRICING_SNAPSHOT_ID = os.getenv(
+        "PRICING_SNAPSHOT", pricing_calc._DEFAULT_PRICING_SNAPSHOT
+    )
     yield
     pricing_calc._pricing_cache = {}
     pricing_calc._current_snapshot = ""
+    pricing_calc.PRICING_SNAPSHOT_ID = os.getenv(
+        "PRICING_SNAPSHOT", pricing_calc._DEFAULT_PRICING_SNAPSHOT
+    )
 
 
 def _clear_relevant_env(monkeypatch):
@@ -23,6 +31,7 @@ def test_llm_cost_and_snapshot_without_tenant(monkeypatch):
     cost = pricing_calc.llm_cost("gpt-4o", in_tokens=1000, out_tokens=1000)
 
     assert cost == 0.0125
+    assert pricing_calc.PRICING_SNAPSHOT_ID == "openai-2025-09"
     assert pricing_calc.get_pricing_snapshot_id() == "openai-2025-09"
 
 
@@ -48,9 +57,11 @@ def test_pricing_cache_switches_snapshots(monkeypatch):
 
     monkeypatch.setenv("PRICING_SNAPSHOT", "first")
     first_cost = pricing_calc.llm_cost("gpt-test", in_tokens=1000)
+    assert pricing_calc.PRICING_SNAPSHOT_ID == "first"
 
     monkeypatch.setenv("PRICING_SNAPSHOT", "second")
     second_cost = pricing_calc.llm_cost("gpt-test", in_tokens=1000)
+    assert pricing_calc.PRICING_SNAPSHOT_ID == "second"
 
     assert first_cost == 0.001
     assert second_cost == 0.01

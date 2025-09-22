@@ -13,6 +13,8 @@ _current_snapshot: str = ""
 _DEFAULT_PRICING_SNAPSHOT = (
     load_pricing.__defaults__[0] if load_pricing.__defaults__ else "openai-2025-09"
 )
+# Maintain backwards compatibility for modules that import the snapshot constant.
+PRICING_SNAPSHOT_ID = os.getenv("PRICING_SNAPSHOT", _DEFAULT_PRICING_SNAPSHOT)
 
 
 def _resolve_pricing_snapshot() -> str:
@@ -27,11 +29,12 @@ def _resolve_pricing_snapshot() -> str:
 
 def _get_pricing_data():
     """Get pricing data, loading from config if needed."""
-    global _pricing_cache, _current_snapshot
+    global _pricing_cache, _current_snapshot, PRICING_SNAPSHOT_ID
 
     snapshot_id = _resolve_pricing_snapshot()
     if _current_snapshot != snapshot_id or not _pricing_cache:
         _pricing_cache, _current_snapshot = load_pricing(snapshot_id)
+        PRICING_SNAPSHOT_ID = _current_snapshot
 
     return _pricing_cache, _current_snapshot
 
