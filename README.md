@@ -192,11 +192,18 @@ with llm_call(
 ```python
 from ai_cost_sdk.integrations.rag_wrapper import embed
 
+
+def simple_embedder(texts, *, model, vendor, **_kwargs):
+    # Replace with a call to your real embedding service
+    return [[float(len(text))] for text in texts]
+
+
 # Automatic token counting and cost tracking
 embeddings = embed(
     texts=["Document 1", "Document 2", "Document 3"],
     model="text-embedding-3-large",
-    vendor="openai"
+    vendor="openai",
+    embedder=simple_embedder,
 )
 ```
 
@@ -205,14 +212,26 @@ embeddings = embed(
 ```python
 from ai_cost_sdk.integrations.rag_wrapper import vector_search
 
+
+def simple_searcher(**kwargs):
+    # Replace with an actual vector store lookup
+    return {
+        "results": [
+            {"id": f"doc-{i}", "score": 1.0 - (0.05 * i)}
+            for i in range(kwargs.get("k", 5))
+        ],
+        "read_units": 10,
+        "price_per_unit": 0.0001,
+    }
+
+
 results = vector_search(
     index_id="my-index",
     query="search query",
     k=5,
     index_version="v1.0",
     vendor="pinecone",
-    read_units=10,
-    price_per_unit=0.0001
+    searcher=simple_searcher,
 )
 ```
 
@@ -238,8 +257,14 @@ from ai_cost_sdk.middleware import agent_turn
 with agent_turn(tenant_id="tenant-123", route="chat-api"):
     # Multiple AI operations within a single agent turn
     response = chat_completion(client, model="gpt-4o", messages=messages)
-    embeddings = embed(documents, model="text-embedding-3-large")
-    results = vector_search("index", query, k=5, index_version="v1")
+    embeddings = embed(documents, model="text-embedding-3-large", embedder=simple_embedder)
+    results = vector_search(
+        "index",
+        query,
+        k=5,
+        index_version="v1",
+        searcher=simple_searcher,
+    )
     weather = get_weather("New York")
     
     # All costs are aggregated and tracked

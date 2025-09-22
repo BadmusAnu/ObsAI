@@ -41,6 +41,33 @@ class FakeClaudeClient:
         )
 
 
+class FakeEmbedder:
+    def embed(self, texts_list: list[str], model: str, vendor: str, **_kwargs):
+        time.sleep(0.002)
+        return [[float(len(text)), float(idx)] for idx, text in enumerate(texts_list)]
+
+
+class FakeVectorStore:
+    def __init__(self, read_units: int, price_per_unit: float):
+        self.read_units = read_units
+        self.price_per_unit = price_per_unit
+
+    def search(self, **kwargs):
+        time.sleep(0.004)
+        matches = [
+            {
+                "id": f"doc-{i}",
+                "score": 1.0 - (i * 0.05),
+            }
+            for i in range(kwargs["k"])
+        ]
+        return {
+            "results": matches,
+            "read_units": self.read_units,
+            "price_per_unit": self.price_per_unit,
+        }
+
+
 @priced_tool("fake_crm", unit_price=0.002, vendor="crm-service")
 def call_crm():
     time.sleep(0.005)
@@ -83,18 +110,26 @@ def demonstrate_llm_calls():
 def demonstrate_rag_operations():
     """Demonstrate RAG operations with proper token counting."""
     print("\n=== RAG Operations Demo ===")
-    
+
+    embedder = FakeEmbedder()
+    vector_store = FakeVectorStore(read_units=6, price_per_unit=0.0002)
+
     # Embedding multiple documents
     documents = [
         "The quick brown fox jumps over the lazy dog.",
         "Machine learning is a subset of artificial intelligence.",
         "Python is a popular programming language for data science."
     ]
-    
+
     with rag_embed(model="text-embedding-3-large", vendor="openai", texts=documents):
-        embeddings = embed(documents, model="text-embedding-3-large", vendor="openai")
+        embeddings = embed(
+            documents,
+            model="text-embedding-3-large",
+            vendor="openai",
+            embedder=embedder,
+        )
         print(f"Generated {len(embeddings)} embeddings")
-    
+
     # Vector search
     with rag_embed(model="text-embedding-3-large", vendor="openai", texts=["search query"]):
         results = vector_search(
@@ -103,8 +138,7 @@ def demonstrate_rag_operations():
             k=3,
             index_version="v2.0",
             vendor="pinecone",
-            read_units=5,
-            price_per_unit=0.0001
+            searcher=vector_store,
         )
         print(f"Search results: {results}")
 
