@@ -1,3 +1,4 @@
+import contextlib
 from types import SimpleNamespace
 
 from opentelemetry import trace
@@ -77,6 +78,7 @@ def test_openai_wrapper_sets_attrs():
     assert llm.attributes["cost.usd.total"] > 0
 
 
+
 def test_openai_wrapper_handles_model_dump_usage():
     exporter = InMemorySpanExporter()
     _configure_tracer(exporter)
@@ -91,6 +93,7 @@ def test_openai_wrapper_handles_model_dump_usage():
     llm = [s for s in spans if s.name == "llm.call"][0]
     assert llm.attributes["ai.tokens.input"] == 11
     assert llm.attributes["ai.tokens.output"] == 13
+
 
 
 def test_rag_wrapper_embed():
