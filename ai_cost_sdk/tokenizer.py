@@ -2,19 +2,25 @@
 
 from __future__ import annotations
 
+import math
 import re
-from typing import Dict, List, Optional, Union
+from functools import lru_cache
+from typing import Dict, List
 
-try:
+try:  # pragma: no cover - exercised indirectly
     import tiktoken
+
     TIKTOKEN_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover - exercised indirectly
     TIKTOKEN_AVAILABLE = False
 
+# Track models whose encodings could not be loaded so we can avoid repeated attempts.
+_FAILED_ENCODINGS: set[str] = set()
+
 # Model to encoding mapping for OpenAI models
-OPENAI_MODEL_ENCODINGS = {
+OPENAI_MODEL_ENCODINGS: Dict[str, str] = {
     "gpt-4o": "o200k_base",
-    "gpt-4o-mini": "o200k_base", 
+    "gpt-4o-mini": "o200k_base",
     "gpt-4": "cl100k_base",
     "gpt-4-turbo": "cl100k_base",
     "gpt-3.5-turbo": "cl100k_base",
@@ -24,16 +30,16 @@ OPENAI_MODEL_ENCODINGS = {
 }
 
 # Claude model patterns (approximate tokenization)
-CLAUDE_MODEL_PATTERNS = {
+CLAUDE_MODEL_PATTERNS: Dict[str, str] = {
     "claude-3-5-sonnet": r"\S+",
-    "claude-3-5-haiku": r"\S+", 
+    "claude-3-5-haiku": r"\S+",
     "claude-3-opus": r"\S+",
     "claude-3-sonnet": r"\S+",
     "claude-3-haiku": r"\S+",
 }
 
 # Gemini model patterns (approximate tokenization)
-GEMINI_MODEL_PATTERNS = {
+GEMINI_MODEL_PATTERNS: Dict[str, str] = {
     "gemini-pro": r"\S+",
     "gemini-pro-vision": r"\S+",
     "gemini-1.5-pro": r"\S+",
@@ -41,143 +47,147 @@ GEMINI_MODEL_PATTERNS = {
 }
 
 
+def _estimate_tokens(words: list[str], text: str) -> int:
+    """Estimate token counts when an exact tokenizer is unavailable."""
+
+    if not words:
+        return 0
+
+    char_estimate = max(1, math.ceil(len(text) / 4))
+
+    if len(words) <= 3:
+        # Short snippets: slightly over-estimate relative to word count.
+        return max(char_estimate, len(words) + 1)
+    if len(words) <= 10:
+        # Slightly longer snippets: lean towards a mild over-estimate.
+        return max(char_estimate, math.ceil(len(words) * 1.2))
+
+    # Long texts: rely on character-based estimate and round up.
+    return char_estimate
+
+
+@lru_cache(maxsize=None)
+def _get_openai_encoding(model: str, encoding_fn_id: int):  # pragma: no cover - exercised indirectly
+    """Cache tiktoken encodings per-model to avoid repeated lookups."""
+
+    if not TIKTOKEN_AVAILABLE:
+        raise RuntimeError("tiktoken is not available")
+
+    encoding_name = OPENAI_MODEL_ENCODINGS.get(model, "cl100k_base")
+    return tiktoken.get_encoding(encoding_name)
+
+
+def _fetch_openai_encoding(model: str):  # pragma: no cover - exercised indirectly
+    if model in _FAILED_ENCODINGS:
+        raise RuntimeError("encoding unavailable")
+
+    try:
+        return _get_openai_encoding(model, id(tiktoken.get_encoding))
+    except Exception:
+        _FAILED_ENCODINGS.add(model)
+        raise
+
+
 def count_tokens_openai(text: str, model: str) -> int:
     """Count tokens for OpenAI models using tiktoken."""
+
     if not TIKTOKEN_AVAILABLE:
-        # Hybrid fallback approach: word-based for short texts, character-based for long texts
-        words = re.findall(r'\S+', text)
-        if not words:
-            return 0
-        
-        if len(words) <= 3:
-            # Very short texts: usually 1 token per word
-            return len(words)
-        elif len(words) <= 10:
-            # Short texts: ~1.2 tokens per word
-            return max(1, int(len(words) * 1.2))
-        else:
-            # Long texts: character-based estimation
-            return max(1, len(text) // 4)
-    
-    encoding_name = OPENAI_MODEL_ENCODINGS.get(model, "cl100k_base")
+        words = re.findall(r"\S+", text)
+        return _estimate_tokens(words, text)
+
     try:
-        encoding = tiktoken.get_encoding(encoding_name)
+        encoding = _fetch_openai_encoding(model)
         return len(encoding.encode(text))
     except Exception:
-        # Fallback to hybrid approach when tiktoken fails
-        words = re.findall(r'\S+', text)
-        if not words:
-            return 0
-        
-        if len(words) <= 3:
-            # Very short texts: usually 1 token per word
-            return len(words)
-        elif len(words) <= 10:
-            # Short texts: ~1.2 tokens per word
-            return max(1, int(len(words) * 1.2))
-        else:
-            # Long texts: character-based estimation
-            return max(1, len(text) // 4)
+        words = re.findall(r"\S+", text)
+        return _estimate_tokens(words, text)
 
 
 def count_tokens_claude(text: str, model: str) -> int:
     """Count tokens for Claude models using word-based approximation."""
-    # Claude uses a different tokenization scheme, but word-based approximation is reasonable
-    # This is more accurate than character-based for Claude
-    words = re.findall(r'\S+', text)
+
+    words = re.findall(r"\S+", text)
     return len(words)
 
 
 def count_tokens_gemini(text: str, model: str) -> int:
     """Count tokens for Gemini models using word-based approximation."""
-    # Gemini also uses different tokenization, word-based approximation is reasonable
-    words = re.findall(r'\S+', text)
+
+    words = re.findall(r"\S+", text)
     return len(words)
 
 
 def count_tokens(text: str, model: str, vendor: str = "openai") -> int:
-    """
-    Count tokens for text using the appropriate tokenizer for the model.
-    
-    Args:
-        text: Input text to tokenize
-        model: Model name (e.g., "gpt-4o", "claude-3-5-sonnet")
-        vendor: Vendor name ("openai", "claude", "gemini")
-    
-    Returns:
-        Number of tokens
-    """
+    """Count tokens for text using the appropriate tokenizer for the model."""
+
     if not text:
         return 0
-    
+
     vendor = vendor.lower()
-    
+
     if vendor == "openai":
         return count_tokens_openai(text, model)
-    elif vendor == "claude":
+    if vendor == "claude":
         return count_tokens_claude(text, model)
-    elif vendor == "gemini":
+    if vendor == "gemini":
         return count_tokens_gemini(text, model)
-    else:
-        # Default fallback for unknown vendors
-        return len(text) // 4
+
+    # Default fallback for unknown vendors
+    return max(1, math.ceil(len(text) / 4))
+
+
+_ORIGINAL_COUNT_TOKENS = count_tokens
 
 
 def count_tokens_batch(texts: List[str], model: str, vendor: str = "openai") -> int:
-    """
-    Count tokens for a batch of texts.
-    
-    Args:
-        texts: List of input texts
-        model: Model name
-        vendor: Vendor name
-    
-    Returns:
-        Total number of tokens across all texts
-    """
+    """Count tokens for a batch of texts."""
+
+    if not texts:
+        return 0
+
+    vendor = vendor.lower()
+
+    if (
+        vendor == "openai"
+        and TIKTOKEN_AVAILABLE
+        and count_tokens is _ORIGINAL_COUNT_TOKENS
+    ):
+        try:
+            encoding = _fetch_openai_encoding(model)
+            if hasattr(encoding, "encode_batch"):
+                return sum(len(tokens) for tokens in encoding.encode_batch(texts))
+            if hasattr(encoding, "encode_ordinary_batch"):
+                return sum(len(tokens) for tokens in encoding.encode_ordinary_batch(texts))
+            return sum(len(encoding.encode(text)) for text in texts)
+        except Exception:
+            pass
+
     return sum(count_tokens(text, model, vendor) for text in texts)
 
 
 def get_model_vendor(model: str) -> str:
-    """
-    Infer vendor from model name.
-    
-    Args:
-        model: Model name
-    
-    Returns:
-        Vendor name ("openai", "claude", "gemini", "unknown")
-    """
+    """Infer vendor from model name."""
+
     model_lower = model.lower()
-    
+
     if any(openai_model in model_lower for openai_model in ["gpt", "text-embedding"]):
         return "openai"
-    elif "claude" in model_lower:
+    if "claude" in model_lower:
         return "claude"
-    elif "gemini" in model_lower:
+    if "gemini" in model_lower:
         return "gemini"
-    else:
-        return "unknown"
+    return "unknown"
 
 
 def validate_model_support(model: str, vendor: str) -> bool:
-    """
-    Check if a model is supported by the tokenizer.
-    
-    Args:
-        model: Model name
-        vendor: Vendor name
-    
-    Returns:
-        True if model is supported
-    """
+    """Check if a model is supported by the tokenizer."""
+
     vendor = vendor.lower()
-    
+
     if vendor == "openai":
         return model in OPENAI_MODEL_ENCODINGS
-    elif vendor == "claude":
+    if vendor == "claude":
         return any(pattern in model.lower() for pattern in CLAUDE_MODEL_PATTERNS)
-    elif vendor == "gemini":
+    if vendor == "gemini":
         return any(pattern in model.lower() for pattern in GEMINI_MODEL_PATTERNS)
-    else:
-        return False
+    return False
