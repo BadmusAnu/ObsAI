@@ -57,7 +57,7 @@ def count_tokens_openai(text: str, model: str) -> int:
             return max(1, int(len(words) * 1.2))
         else:
             # Long texts: character-based estimation
-            return max(1, len(text) // 4)
+            return max(1, (len(text) + 3) // 4)
     
     encoding_name = OPENAI_MODEL_ENCODINGS.get(model, "cl100k_base")
     try:
@@ -77,7 +77,7 @@ def count_tokens_openai(text: str, model: str) -> int:
             return max(1, int(len(words) * 1.2))
         else:
             # Long texts: character-based estimation
-            return max(1, len(text) // 4)
+            return max(1, (len(text) + 3) // 4)
 
 
 def count_tokens_claude(text: str, model: str) -> int:
@@ -120,7 +120,7 @@ def count_tokens(text: str, model: str, vendor: str = "openai") -> int:
         return count_tokens_gemini(text, model)
     else:
         # Default fallback for unknown vendors
-        return len(text) // 4
+        return (len(text) + 3) // 4
 
 
 def count_tokens_batch(texts: List[str], model: str, vendor: str = "openai") -> int:
