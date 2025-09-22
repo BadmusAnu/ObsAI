@@ -12,6 +12,14 @@ from ai_cost_sdk.middleware import agent_turn
 from ai_cost_sdk.tokenizer import count_tokens, count_tokens_batch, get_model_vendor
 
 
+def _configure_tracer(exporter: InMemorySpanExporter) -> None:
+    provider = trace.get_tracer_provider()
+    if not isinstance(provider, TracerProvider):
+        provider = TracerProvider()
+        trace.set_tracer_provider(provider)
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+
+
 class _ChatCompletions:
     def create(self, **_kwargs):
         return SimpleNamespace(
@@ -28,11 +36,33 @@ class Client:
     chat = _Chat()
 
 
+class _PydanticLikeUsage:
+    def __init__(self, data):
+        self._data = data
+
+    def model_dump(self):
+        return self._data
+
+
+class _ChatCompletionsModelDump:
+    def create(self, **_kwargs):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="hi"))],
+            usage=_PydanticLikeUsage({"prompt_tokens": 11, "completion_tokens": 13}),
+        )
+
+
+class _ChatModelDump:
+    completions = _ChatCompletionsModelDump()
+
+
+class ClientModelDump:
+    chat = _ChatModelDump()
+
+
 def test_openai_wrapper_sets_attrs():
     exporter = InMemorySpanExporter()
-    provider = TracerProvider()
-    provider.add_span_processor(SimpleSpanProcessor(exporter))
-    trace.set_tracer_provider(provider)
+    _configure_tracer(exporter)
 
     client = Client()
     with agent_turn("t1", "r1"):
@@ -45,6 +75,22 @@ def test_openai_wrapper_sets_attrs():
     assert llm.attributes["ai.tokens.input"] == 5
     assert llm.attributes["ai.tokens.output"] == 7
     assert llm.attributes["cost.usd.total"] > 0
+
+
+def test_openai_wrapper_handles_model_dump_usage():
+    exporter = InMemorySpanExporter()
+    _configure_tracer(exporter)
+
+    client = ClientModelDump()
+    with agent_turn("t1", "r1"):
+        chat_completion(
+            client, model="gpt-4o", messages=[{"role": "user", "content": "hi"}]
+        )
+
+    spans = exporter.get_finished_spans()
+    llm = [s for s in spans if s.name == "llm.call"][0]
+    assert llm.attributes["ai.tokens.input"] == 11
+    assert llm.attributes["ai.tokens.output"] == 13
 
 
 def test_rag_wrapper_embed():
