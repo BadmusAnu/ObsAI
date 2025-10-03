@@ -6,7 +6,7 @@ import os
 from decimal import Decimal
 
 from .pricing import load_pricing
-from .config import load_config
+from .config import load_config_permissive
 
 # Cache for pricing data to avoid repeated loading
 _pricing_cache: dict = {}
@@ -19,27 +19,10 @@ PRICING_SNAPSHOT_ID = os.getenv("PRICING_SNAPSHOT", _DEFAULT_PRICING_SNAPSHOT)
 
 
 def _resolve_pricing_snapshot() -> str:
-    """Determine which pricing snapshot should be used."""
+    """Return the pricing snapshot ID, tolerating partial configuration."""
 
-    try:
-        return load_config().pricing_snapshot
-    except ValueError:
-        # Fall back to the environment variable/default when tenant/project are missing.
-        return os.getenv("PRICING_SNAPSHOT", _DEFAULT_PRICING_SNAPSHOT)
-
-
-def _resolve_pricing_snapshot() -> str:
-    """Return the pricing snapshot ID without enforcing tenant/project config."""
-
-    try:
-        config = load_config()
-    except ValueError:
-        # When tenant/project values are missing we still want pricing helpers to
-        # operate. Fall back to reading the snapshot directly from the
-        # environment, mirroring the default used by ``load_config``.
-        return os.getenv("PRICING_SNAPSHOT", "openai-2025-09")
-
-    return config.pricing_snapshot
+    config = load_config_permissive()
+    return config.pricing_snapshot or os.getenv("PRICING_SNAPSHOT", _DEFAULT_PRICING_SNAPSHOT)
 
 
 def _get_pricing_data():
@@ -51,6 +34,8 @@ def _get_pricing_data():
     if _current_snapshot != snapshot_id or not _pricing_cache:
         _pricing_cache, _current_snapshot = load_pricing(snapshot_id)
         PRICING_SNAPSHOT_ID = _current_snapshot
+
+    return _pricing_cache, _current_snapshot
 
 
 def llm_cost(
