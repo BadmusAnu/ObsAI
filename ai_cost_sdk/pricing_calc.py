@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import os
-from decimal import Decimal
 
 from .pricing import load_pricing
-from .config import load_config
+from .config import load_config_permissive
 
 # Cache for pricing data to avoid repeated loading
 _pricing_cache: dict = {}
@@ -19,27 +18,10 @@ PRICING_SNAPSHOT_ID = os.getenv("PRICING_SNAPSHOT", _DEFAULT_PRICING_SNAPSHOT)
 
 
 def _resolve_pricing_snapshot() -> str:
-    """Determine which pricing snapshot should be used."""
+    """Return the pricing snapshot ID, tolerating partial configuration."""
 
-    try:
-        return load_config().pricing_snapshot
-    except ValueError:
-        # Fall back to the environment variable/default when tenant/project are missing.
-        return os.getenv("PRICING_SNAPSHOT", _DEFAULT_PRICING_SNAPSHOT)
-
-
-def _resolve_pricing_snapshot() -> str:
-    """Return the pricing snapshot ID without enforcing tenant/project config."""
-
-    try:
-        config = load_config()
-    except ValueError:
-        # When tenant/project values are missing we still want pricing helpers to
-        # operate. Fall back to reading the snapshot directly from the
-        # environment, mirroring the default used by ``load_config``.
-        return os.getenv("PRICING_SNAPSHOT", "openai-2025-09")
-
-    return config.pricing_snapshot
+    config = load_config_permissive()
+    return config.pricing_snapshot or os.getenv("PRICING_SNAPSHOT", _DEFAULT_PRICING_SNAPSHOT)
 
 
 def _get_pricing_data():
@@ -51,6 +33,8 @@ def _get_pricing_data():
     if _current_snapshot != snapshot_id or not _pricing_cache:
         _pricing_cache, _current_snapshot = load_pricing(snapshot_id)
         PRICING_SNAPSHOT_ID = _current_snapshot
+
+    return _pricing_cache, _current_snapshot
 
 
 def llm_cost(
@@ -67,15 +51,17 @@ def llm_cost(
         warnings.warn(f"No pricing data found for {vendor}/{model}. Cost will be 0.", UserWarning)
         return 0.0
 
-    price_in = prices.get("in", 0.0)
-    price_out = prices.get("out", 0.0)
-    thousand = Decimal(1000)
-    cost_decimal = (Decimal(in_tokens) / thousand) * Decimal(str(price_in))
-    cost_decimal += (Decimal(out_tokens) / thousand) * Decimal(str(price_out))
-    cost = float(cost_decimal)
+    price_in = float(prices.get("in", 0.0))
+    price_out = float(prices.get("out", 0.0))
+    cost = (in_tokens / 1000) * price_in
+    cost += (out_tokens / 1000) * price_out
+
     if cached_tokens:
-        cost -= (cached_tokens / 1000) * price_in
-    return cost
+        effective_cached_tokens = min(cached_tokens, in_tokens)
+        cost -= (effective_cached_tokens / 1000) * price_in
+        return max(cost, 0.0)
+
+    return round(max(cost, 0.0), 10)
 
 
 def embedding_cost(model: str, tokens: int = 0) -> float:

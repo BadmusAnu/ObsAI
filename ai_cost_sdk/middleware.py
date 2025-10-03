@@ -9,12 +9,12 @@ import time
 
 from opentelemetry import trace
 
-from .config import load_config, Config
+from .config import load_config, load_config_permissive, Config
 from .metrics import (
     AGENT_COST, AGENT_LATENCY, LLM_REQUESTS, LLM_TOKENS, AGENT_REQUESTS,
-    LLM_COST_PER_REQUEST, AGENT_COST_PER_REQUEST, LLM_LATENCY, RAG_LATENCY, 
+    LLM_COST_PER_REQUEST, AGENT_COST_PER_REQUEST, LLM_LATENCY, RAG_LATENCY,
     TOOL_LATENCY, LLM_THROUGHPUT, AGENT_THROUGHPUT, LLM_ERRORS, AGENT_ERRORS,
-    ACTIVE_REQUESTS, QUEUE_SIZE
+    ACTIVE_REQUESTS
 )
 from .pricing_calc import (
     embedding_cost,
@@ -23,7 +23,7 @@ from .pricing_calc import (
     tool_cost,
     get_pricing_snapshot_id,
 )
-from .tokenizer import count_tokens, get_model_vendor
+from .tokenizer import count_tokens
 
 _turn_cost: contextvars.ContextVar[float] = contextvars.ContextVar(
     "turn_cost", default=0.0
@@ -51,18 +51,7 @@ def _load_config_with_fallback() -> Config:
     try:
         return load_config()
     except ValueError:
-        return Config(
-            sdk_enabled=_env_bool("SDK_ENABLED", True),
-            tenant_id=os.getenv("TENANT_ID", ""),
-            project_id=os.getenv("PROJECT_ID", ""),
-            route=os.getenv("ROUTE", "default"),
-            export_otlp_endpoint=os.getenv("EXPORT_OTLP_ENDPOINT"),
-            export_json_path=os.getenv("EXPORT_JSON_PATH"),
-            pricing_snapshot=os.getenv("PRICING_SNAPSHOT", "openai-2025-09"),
-            redact_prompts=_env_bool("REDACT_PROMPTS", True),
-            tokenize_fallback=_env_bool("TOKENIZE_FALLBACK", False),
-            service_name=os.getenv("SERVICE_NAME", "ai-cost-sdk"),
-        )
+        return load_config_permissive()
 
 
 def _get_config() -> Config:
