@@ -97,59 +97,16 @@ def _is_tokenize_fallback_enabled() -> bool:
         return config.load_config_permissive().tokenize_fallback
 
 
-def _coerce_messages(payload: Any) -> list[Any]:
-    """Ensure chat payloads are realized as a list for reuse."""
-
-    if payload is None:
-        return []
-    if isinstance(payload, list):
-        return payload
-    return list(payload)
-
-
-def _collect_completion_text(message: Any) -> str:
-    """Extract plain text from an assistant message for tokenization."""
-
-    if message is None:
-        return ""
-
-    segments: list[str] = []
-
-    if isinstance(message, dict):
-        content = message.get("content")
-        tool_calls = message.get("tool_calls")
-    else:
-        content = getattr(message, "content", None)
-        tool_calls = getattr(message, "tool_calls", None)
-
-    if content:
-        segments.extend(_extract_text_segments(content))
-
-    if tool_calls:
-        segments.extend(_extract_text_segments(tool_calls))
-
-    if not segments:
-        try:
-            fallback = str(message)
-        except Exception:  # pragma: no cover - defensive
-            fallback = ""
-        if fallback:
-            segments.append(fallback)
-
-    return " ".join(part for part in segments if part)
-
-
 def chat_completion(client, **kwargs):
     """OpenAI chat completion with enhanced cost tracking."""
 
     model = kwargs.get("model")
-    messages = _coerce_messages(kwargs.get("messages"))
-    kwargs["messages"] = messages
+    messages = kwargs.get("messages", [])
 
     tokenize_fallback_enabled = _is_tokenize_fallback_enabled()
     prompt_for_span = None
     if tokenize_fallback_enabled and messages:
-        prompt_for_span = _build_prompt_text(messages)
+        prompt_for_span = _build_prompt_text(list(messages))
 
     usage: dict = {}
     vendor = get_model_vendor(model) if model else "openai"
@@ -168,11 +125,11 @@ def chat_completion(client, **kwargs):
 
         if tokenize_fallback_enabled:
             if not usage.get("prompt_tokens") and messages:
-                prompt_text = prompt_for_span or _build_prompt_text(messages)
+                prompt_text = prompt_for_span or _build_prompt_text(list(messages))
                 if prompt_text:
                     usage["prompt_tokens"] = count_tokens(prompt_text, model, vendor)
             if not usage.get("completion_tokens") and response.choices:
-                completion_text = _collect_completion_text(response.choices[0].message)
+                completion_text = response.choices[0].message.content or ""
                 if completion_text:
                     usage["completion_tokens"] = count_tokens(completion_text, model, vendor)
 

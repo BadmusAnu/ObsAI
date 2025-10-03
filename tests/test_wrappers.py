@@ -127,6 +127,24 @@ def test_openai_wrapper_sets_attrs():
 
 
 
+def test_openai_wrapper_sets_attrs():
+    TEST_EXPORTER.clear()
+    _EXPORTER.clear()
+
+    client = Client()
+    with agent_turn("t1", "r1"):
+        chat_completion(
+            client, model="gpt-4o", messages=[{"role": "user", "content": "hi"}]
+        )
+
+    spans = _finished_spans()
+    llm = [s for s in spans if s.name == "llm.call"][0]
+    assert llm.attributes["ai.tokens.input"] == 5
+    assert llm.attributes["ai.tokens.output"] == 7
+    assert llm.attributes["cost.usd.total"] > 0
+
+
+
 class _FakeEmbedder:
     def __init__(self):
         self.calls = []
