@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from typing import Any, Callable, Sequence
+from typing import Any, Callable
 
 from .. import config, middleware
 from ..tokenizer import count_tokens_batch, get_model_vendor
@@ -14,50 +14,75 @@ SearchBackend = Callable[..., Any]
 
 def embed(
     texts: Iterable[str],
-    model: str,
-    vendor: str = "openai",
+    model: str | None = None,
+    vendor: str | None = None,
     *,
     embedder: EmbeddingBackend | None = None,
-    **embed_kwargs: Any,
+    client: Any | None = None,
+    api_key: str | None = None,
+    batch_size: int | None = None,
+    **backend_kwargs: Any,
 ) -> list[list[float]]:
-    """Embed texts using a configurable backend with proper token counting.
-
-    Args:
-        texts: Iterable of strings to embed.
-        model: Embedding model identifier.
-        vendor: Vendor name for pricing/metrics.
-        embedder: Callable or client responsible for generating embeddings. The
-            callable will receive ``texts`` (as a list), ``model`` and
-            ``vendor`` as keyword arguments along with any ``embed_kwargs``.
-        **embed_kwargs: Additional keyword arguments forwarded to the backend.
-
-    Returns:
-        List of embedding vectors returned by the backend.
-    """
-
+    """Embed texts with proper token counting and configurable backends."""
 
     texts_list = list(texts)
-    if embedder is None:
-        raise ValueError("An embedding backend must be provided via 'embedder'.")
+    if not texts_list:
+        return []
 
-    tokens = count_tokens_batch(texts_list, model, vendor)
+    sdk_config = config.load_config_permissive()
 
-    with middleware.rag_embed(model=model, vendor=vendor, tokens=tokens, texts=texts_list) as span:
-        raw_embeddings = _call_embed_backend(
-            embedder,
-            texts_list=texts_list,
-            model=model,
-            vendor=vendor,
-            **embed_kwargs,
-        )
-        embeddings = _normalize_embeddings(raw_embeddings)
+    resolved_model = model or sdk_config.embedding_model
+    if not resolved_model:
+        raise ValueError("An embedding model must be provided via argument or configuration")
 
-        if span is not None:
-            span.set_attribute("rag.embedding.count", len(embeddings))
-            if embeddings:
-                span.set_attribute("rag.embedding.dim", len(embeddings[0]))
+    resolved_vendor = vendor or get_model_vendor(resolved_model)
 
+    tokens = count_tokens_batch(texts_list, resolved_model, resolved_vendor)
+
+    with middleware.rag_embed(
+        model=resolved_model,
+        vendor=resolved_vendor,
+        tokens=tokens,
+        texts=texts_list,
+    ) as span:
+        if embedder is not None:
+            raw_embeddings = _call_embed_backend(
+                embedder,
+                texts_list=texts_list,
+                model=resolved_model,
+                vendor=resolved_vendor,
+                **backend_kwargs,
+            )
+            embeddings = _normalize_embeddings(raw_embeddings)
+        else:
+            resolved_api_key = api_key or sdk_config.embedding_api_key
+            resolved_client = client or _ensure_client(resolved_vendor, resolved_api_key)
+
+            resolved_batch_size = batch_size or sdk_config.embedding_batch_size or len(texts_list)
+            if resolved_batch_size <= 0:
+                resolved_batch_size = len(texts_list)
+
+            collected: list[Sequence[float]] = []
+            for start in range(0, len(texts_list), resolved_batch_size):
+                batch = texts_list[start : start + resolved_batch_size]
+                response = resolved_client.embeddings.create(
+                    model=resolved_model,
+                    input=batch,
+                    **backend_kwargs,
+                )
+                batch_embeddings = _extract_embeddings(response)
+                if len(batch_embeddings) != len(batch):
+                    raise ValueError(
+                        "Embedding response length (%d) did not match input batch (%d)"
+                        % (len(batch_embeddings), len(batch))
+                    )
+                collected.extend(batch_embeddings)
+
+            embeddings = [list(vec) for vec in collected]
+
+        _record_embedding_span(span, embeddings)
         return embeddings
+
 
 def _ensure_client(vendor: str, api_key: str | None) -> Any:
     """Instantiate a default embeddings client for supported vendors."""
@@ -98,62 +123,6 @@ def _extract_embeddings(response: Any) -> list[Sequence[float]]:
             raise ValueError("Embedding item missing 'embedding' field")
 
     return embeddings
-
-
-def embed(
-    texts: Iterable[str],
-    model: str | None = None,
-    vendor: str | None = None,
-    *,
-    client: Any | None = None,
-    api_key: str | None = None,
-    batch_size: int | None = None,
-    **client_kwargs: Any,
-):
-    """Embed texts with proper token counting."""
-
-    texts_list = list(texts)
-    if not texts_list:
-        return []
-
-    sdk_config = config.load_config()
-
-    model = model or sdk_config.embedding_model
-    if not model:
-        raise ValueError("An embedding model must be provided via argument or configuration")
-
-    resolved_vendor = vendor or get_model_vendor(model)
-
-    api_key = api_key or sdk_config.embedding_api_key
-
-    batch_size = batch_size or sdk_config.embedding_batch_size or len(texts_list)
-    if batch_size <= 0:
-        batch_size = len(texts_list)
-
-    client = client or _ensure_client(resolved_vendor, api_key)
-
-    tokens = count_tokens_batch(texts_list, model, resolved_vendor)
-
-    embeddings: list[Sequence[float]] = []
-
-    with middleware.rag_embed(
-        model=model,
-        vendor=resolved_vendor,
-        tokens=tokens,
-        texts=texts_list,
-    ):
-        for start in range(0, len(texts_list), batch_size):
-            batch = texts_list[start : start + batch_size]
-            response = client.embeddings.create(model=model, input=batch, **client_kwargs)
-            batch_embeddings = _extract_embeddings(response)
-            if len(batch_embeddings) != len(batch):
-                raise ValueError(
-                    "Embedding response length (%d) did not match input batch (%d)"
-                    % (len(batch_embeddings), len(batch))
-                )
-            embeddings.extend(batch_embeddings)
-
-    return [list(vec) for vec in embeddings]
 
 
 def vector_search(
@@ -412,3 +381,14 @@ def _extract_metric(metadata: Any, paths: Sequence[Sequence[str]]) -> int | floa
             if isinstance(value, (int, float)):
                 return value
     return None
+
+
+def _record_embedding_span(span: Any, embeddings: list[list[float]]) -> None:
+    """Attach embedding metadata to the active span when available."""
+
+    if span is None:
+        return
+
+    span.set_attribute("rag.embedding.count", len(embeddings))
+    if embeddings and embeddings[0]:
+        span.set_attribute("rag.embedding.dim", len(embeddings[0]))

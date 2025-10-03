@@ -8,6 +8,8 @@ os.environ.setdefault("PROJECT_ID", "test-project")
 import contextlib
 from types import SimpleNamespace
 
+import pytest
+
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -35,6 +37,15 @@ _EXPORTER = InMemorySpanExporter()
 _PROVIDER = TracerProvider()
 _PROVIDER.add_span_processor(SimpleSpanProcessor(_EXPORTER))
 trace.set_tracer_provider(_PROVIDER)
+
+
+def _finished_spans():
+    spans = _EXPORTER.get_finished_spans()
+    if spans:
+        return spans
+    return TEST_EXPORTER.get_finished_spans()
+
+
 def _configure_tracer(exporter: InMemorySpanExporter) -> None:
     provider = trace.get_tracer_provider()
     if not isinstance(provider, TracerProvider):
@@ -189,8 +200,10 @@ def test_openai_wrapper_handles_model_dump_usage():
 
 
 def test_rag_wrapper_embed():
-    """Test RAG embedding wrapper with proper token counting."""
+    """Test RAG embedding wrapper with both custom and default backends."""
+
     TEST_EXPORTER.clear()
+    _EXPORTER.clear()
 
     texts = ["Hello world", "Test document"]
     fake_embedder = _FakeEmbedder()
@@ -199,18 +212,25 @@ def test_rag_wrapper_embed():
         texts,
         model="text-embedding-3-large",
         vendor="openai",
-
         embedder=fake_embedder,
     )
 
     assert embeddings == [[11.0, 0.0], [13.0, 1.0]]
     assert fake_embedder.calls[0]["texts"] == texts
 
-    spans = TEST_EXPORTER.get_finished_spans()
+    spans = _finished_spans()
     rag_embed_spans = [s for s in spans if s.name == "rag.embed"]
     assert rag_embed_spans
     assert rag_embed_spans[0].attributes["rag.embedding.count"] == 2
 
+    TEST_EXPORTER.clear()
+    _EXPORTER.clear()
+
+    client = FakeEmbeddingClient()
+    embeddings = embed(
+        texts,
+        model="text-embedding-3-large",
+        vendor="openai",
         client=client,
         batch_size=1,
     )
@@ -223,7 +243,7 @@ def test_rag_wrapper_embed():
     assert embeddings == expected
     assert len(client.embeddings.calls) == 2  # batched to single item per call
 
-    spans = _EXPORTER.get_finished_spans()
+    spans = _finished_spans()
     rag_spans = [s for s in spans if s.name == "rag.embed"]
     assert len(rag_spans) == 1
     rag_span = rag_spans[0]
@@ -237,6 +257,7 @@ def test_rag_wrapper_embed():
 def test_rag_wrapper_search():
     """Test RAG search wrapper."""
     TEST_EXPORTER.clear()
+    _EXPORTER.clear()
 
     fake_client = _FakeVectorClient(read_units=9, price_per_unit=0.002)
 
@@ -252,11 +273,11 @@ def test_rag_wrapper_search():
     assert [r["id"] for r in results] == ["doc-0", "doc-1", "doc-2"]
     assert fake_client.calls[0]["index_id"] == "test-index"
 
-    spans = TEST_EXPORTER.get_finished_spans()
+    spans = _finished_spans()
     rag_search_spans = [s for s in spans if s.name == "rag.search"]
     assert rag_search_spans
     assert rag_search_spans[0].attributes["rag.read_units"] == 9
-    assert rag_search_spans[0].attributes["cost.usd.total"] == 0.018
+    assert rag_search_spans[0].attributes["cost.usd.total"] == pytest.approx(0.018)
 
 
 def test_tool_wrapper():
