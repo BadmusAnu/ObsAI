@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from decimal import Decimal
 
 from .pricing import load_pricing
 from .config import load_config_permissive
@@ -52,15 +51,17 @@ def llm_cost(
         warnings.warn(f"No pricing data found for {vendor}/{model}. Cost will be 0.", UserWarning)
         return 0.0
 
-    price_in = prices.get("in", 0.0)
-    price_out = prices.get("out", 0.0)
-    thousand = Decimal(1000)
-    cost_decimal = (Decimal(in_tokens) / thousand) * Decimal(str(price_in))
-    cost_decimal += (Decimal(out_tokens) / thousand) * Decimal(str(price_out))
-    cost = float(cost_decimal)
+    price_in = float(prices.get("in", 0.0))
+    price_out = float(prices.get("out", 0.0))
+    cost = (in_tokens / 1000) * price_in
+    cost += (out_tokens / 1000) * price_out
+
     if cached_tokens:
-        cost -= (cached_tokens / 1000) * price_in
-    return cost
+        effective_cached_tokens = min(cached_tokens, in_tokens)
+        cost -= (effective_cached_tokens / 1000) * price_in
+        return max(cost, 0.0)
+
+    return round(max(cost, 0.0), 10)
 
 
 def embedding_cost(model: str, tokens: int = 0) -> float:

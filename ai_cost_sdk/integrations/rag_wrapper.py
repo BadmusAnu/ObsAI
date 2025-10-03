@@ -158,7 +158,6 @@ def vector_search(
             query=query,
             k=k,
             index_version=index_version,
-            vendor=vendor,
             **search_kwargs,
         )
 
@@ -226,7 +225,6 @@ def _call_search_backend(
     query: str,
     k: int,
     index_version: str,
-    vendor: str,
     **search_kwargs: Any,
 ) -> tuple[list[Any], int | None, float | None]:
     """Invoke the configured search backend and normalize the response."""
@@ -236,7 +234,6 @@ def _call_search_backend(
         "query": query,
         "k": k,
         "index_version": index_version,
-        "vendor": vendor,
     }
     call_kwargs.update(search_kwargs)
 

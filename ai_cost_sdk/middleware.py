@@ -12,9 +12,9 @@ from opentelemetry import trace
 from .config import load_config, load_config_permissive, Config
 from .metrics import (
     AGENT_COST, AGENT_LATENCY, LLM_REQUESTS, LLM_TOKENS, AGENT_REQUESTS,
-    LLM_COST_PER_REQUEST, AGENT_COST_PER_REQUEST, LLM_LATENCY, RAG_LATENCY, 
+    LLM_COST_PER_REQUEST, AGENT_COST_PER_REQUEST, LLM_LATENCY, RAG_LATENCY,
     TOOL_LATENCY, LLM_THROUGHPUT, AGENT_THROUGHPUT, LLM_ERRORS, AGENT_ERRORS,
-    ACTIVE_REQUESTS, QUEUE_SIZE
+    ACTIVE_REQUESTS
 )
 from .pricing_calc import (
     embedding_cost,
@@ -23,7 +23,7 @@ from .pricing_calc import (
     tool_cost,
     get_pricing_snapshot_id,
 )
-from .tokenizer import count_tokens, get_model_vendor
+from .tokenizer import count_tokens
 
 _turn_cost: contextvars.ContextVar[float] = contextvars.ContextVar(
     "turn_cost", default=0.0

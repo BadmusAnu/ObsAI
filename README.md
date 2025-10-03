@@ -379,7 +379,12 @@ python -m pytest tests/test_pricing.py
 
 # Run with coverage
 python -m pytest --cov=ai_cost_sdk tests/
+
+# Run Ruff linting
+ruff check .
 ```
+
+> **Note:** Recent versions of Ruff removed the shorthand `ruff .`; use `ruff check .` instead to avoid the "unrecognized subcommand" error.
 
 ### Test Examples
 

@@ -1,11 +1,9 @@
-
 import os
 
 os.environ.setdefault("SDK_ENABLED", "1")
 os.environ.setdefault("TENANT_ID", "test-tenant")
 os.environ.setdefault("PROJECT_ID", "test-project")
 
-import contextlib
 from types import SimpleNamespace
 
 import pytest
@@ -27,10 +25,6 @@ TEST_EXPORTER = InMemorySpanExporter()
 TEST_PROVIDER = TracerProvider()
 TEST_PROVIDER.add_span_processor(SimpleSpanProcessor(TEST_EXPORTER))
 trace.set_tracer_provider(TEST_PROVIDER)
-
-
-os.environ.setdefault("TENANT_ID", "test-tenant")
-os.environ.setdefault("PROJECT_ID", "test-project")
 
 
 _EXPORTER = InMemorySpanExporter()
@@ -72,6 +66,24 @@ class Client:
 
 
 
+def test_openai_wrapper_sets_attrs():
+    TEST_EXPORTER.clear()
+    _EXPORTER.clear()
+
+    client = Client()
+    with agent_turn("t1", "r1"):
+        chat_completion(
+            client, model="gpt-4o", messages=[{"role": "user", "content": "hi"}]
+        )
+
+    spans = _finished_spans()
+    llm = [s for s in spans if s.name == "llm.call"][0]
+    assert llm.attributes["ai.tokens.input"] == 5
+    assert llm.attributes["ai.tokens.output"] == 7
+    assert llm.attributes["cost.usd.total"] > 0
+
+
+
 class _FakeEmbedder:
     def __init__(self):
         self.calls = []
@@ -109,10 +121,6 @@ class _FakeVectorClient:
         }
 
 
-def test_openai_wrapper_sets_attrs():
-    TEST_EXPORTER.clear()
-
-
 class _EmbeddingsAPI:
     def __init__(self):
         self.calls: list[dict] = []
@@ -134,9 +142,6 @@ class FakeEmbeddingClient:
     def __init__(self):
         self.embeddings = _EmbeddingsAPI()
 
-
-def test_openai_wrapper_sets_attrs():
-    _EXPORTER.clear()
 
 class _PydanticLikeUsage:
     def __init__(self, data):
@@ -160,26 +165,6 @@ class _ChatModelDump:
 
 class ClientModelDump:
     chat = _ChatModelDump()
-
-
-def test_openai_wrapper_sets_attrs():
-    exporter = InMemorySpanExporter()
-    _configure_tracer(exporter)
-
-
-    client = Client()
-    with agent_turn("t1", "r1"):
-        chat_completion(
-            client, model="gpt-4o", messages=[{"role": "user", "content": "hi"}]
-        )
-
-
-    spans = TEST_EXPORTER.get_finished_spans()
-    llm = [s for s in spans if s.name == "llm.call"][0]
-    assert llm.attributes["ai.tokens.input"] == 5
-    assert llm.attributes["ai.tokens.output"] == 7
-    assert llm.attributes["cost.usd.total"] > 0
-
 
 
 def test_openai_wrapper_handles_model_dump_usage():
@@ -279,6 +264,33 @@ def test_rag_wrapper_search():
     assert rag_search_spans[0].attributes["rag.read_units"] == 9
     assert rag_search_spans[0].attributes["cost.usd.total"] == pytest.approx(0.018)
 
+
+def test_rag_wrapper_search_vendor_not_forwarded():
+    TEST_EXPORTER.clear()
+    _EXPORTER.clear()
+
+    calls: list[dict] = []
+
+    def vendorless_searcher(*, index_id: str, query: str, k: int, index_version: str):
+        calls.append({
+            "index_id": index_id,
+            "query": query,
+            "k": k,
+            "index_version": index_version,
+        })
+        return ([{"id": "doc-1"}], {"read_units": 1, "price_per_unit": 0.001})
+
+    results = vector_search(
+        index_id="idx",
+        query="hello",
+        k=1,
+        index_version="v1",
+        vendor="pinecone",
+        searcher=vendorless_searcher,
+    )
+
+    assert results == [{"id": "doc-1"}]
+    assert calls == [{"index_id": "idx", "query": "hello", "k": 1, "index_version": "v1"}]
 
 def test_tool_wrapper():
     """Test tool wrapper with cost tracking."""

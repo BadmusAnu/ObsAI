@@ -43,6 +43,20 @@ def test_other_costs(monkeypatch):
     assert pricing_calc.tool_cost(0.5) == 0.5
 
 
+def test_llm_cost_clamps_cached_tokens(monkeypatch):
+    _clear_relevant_env(monkeypatch)
+
+    cost_with_only_cache = pricing_calc.llm_cost(
+        "gpt-4o", in_tokens=0, out_tokens=0, cached_tokens=500
+    )
+    cost_with_large_cache = pricing_calc.llm_cost(
+        "gpt-4o", in_tokens=100, out_tokens=0, cached_tokens=1_000_000
+    )
+
+    assert cost_with_only_cache == 0.0
+    assert cost_with_large_cache >= 0.0
+
+
 def test_pricing_cache_switches_snapshots(monkeypatch):
     _clear_relevant_env(monkeypatch)
 

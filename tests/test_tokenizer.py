@@ -1,7 +1,6 @@
 """Test tokenizer functionality."""
 
 import time
-import pytest
 from unittest.mock import patch
 
 from ai_cost_sdk.tokenizer import (
@@ -107,23 +106,23 @@ def test_get_model_vendor():
 def test_validate_model_support():
     """Test model support validation."""
     # OpenAI models
-    assert validate_model_support("gpt-4o", "openai") == True
-    assert validate_model_support("gpt-4", "openai") == True
-    assert validate_model_support("text-embedding-3-large", "openai") == True
-    assert validate_model_support("unknown-model", "openai") == False
+    assert validate_model_support("gpt-4o", "openai")
+    assert validate_model_support("gpt-4", "openai")
+    assert validate_model_support("text-embedding-3-large", "openai")
+    assert not validate_model_support("unknown-model", "openai")
     
     # Claude models
-    assert validate_model_support("claude-3-5-sonnet", "claude") == True
-    assert validate_model_support("claude-3-5-haiku", "claude") == True
-    assert validate_model_support("unknown-model", "claude") == False
+    assert validate_model_support("claude-3-5-sonnet", "claude")
+    assert validate_model_support("claude-3-5-haiku", "claude")
+    assert not validate_model_support("unknown-model", "claude")
     
     # Gemini models
-    assert validate_model_support("gemini-pro", "gemini") == True
-    assert validate_model_support("gemini-1.5-pro", "gemini") == True
-    assert validate_model_support("unknown-model", "gemini") == False
+    assert validate_model_support("gemini-pro", "gemini")
+    assert validate_model_support("gemini-1.5-pro", "gemini")
+    assert not validate_model_support("unknown-model", "gemini")
     
     # Unknown vendors
-    assert validate_model_support("any-model", "unknown") == False
+    assert not validate_model_support("any-model", "unknown")
 
 
 def test_tokenizer_edge_cases():
