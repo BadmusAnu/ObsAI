@@ -34,7 +34,7 @@ def load_config() -> Config:
     """Load configuration from environment variables."""
     tenant_id = os.getenv("TENANT_ID", "")
     project_id = os.getenv("PROJECT_ID", "")
-    
+
     # Validate required fields when SDK is enabled
     sdk_enabled = _get_bool("SDK_ENABLED", True)
     if sdk_enabled:
@@ -42,7 +42,23 @@ def load_config() -> Config:
             raise ValueError("TENANT_ID is required when SDK_ENABLED is true")
         if not project_id:
             raise ValueError("PROJECT_ID is required when SDK_ENABLED is true")
-    
+
+    return _build_config(tenant_id, project_id, sdk_enabled)
+
+
+def load_config_permissive() -> Config:
+    """Load configuration without enforcing tenant/project requirements."""
+
+    tenant_id = os.getenv("TENANT_ID", "")
+    project_id = os.getenv("PROJECT_ID", "")
+    sdk_enabled = _get_bool("SDK_ENABLED", True)
+
+    return _build_config(tenant_id, project_id, sdk_enabled)
+
+
+def _build_config(tenant_id: str, project_id: str, sdk_enabled: bool) -> Config:
+    """Helper to construct the config dataclass from environment variables."""
+
     return Config(
         sdk_enabled=sdk_enabled,
         tenant_id=tenant_id,

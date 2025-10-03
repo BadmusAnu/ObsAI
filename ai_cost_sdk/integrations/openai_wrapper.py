@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 
-import os
 from typing import Any
 
 
@@ -76,32 +75,47 @@ def _normalize_message_content(content: Any) -> str:
     return " ".join(part for part in parts if part)
 
 
+def _build_prompt_text(messages: list[Any]) -> str:
+    """Flatten a list of chat messages into a single prompt string."""
+
+    normalized: list[str] = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        text = _normalize_message_content(msg.get("content"))
+        if text:
+            normalized.append(text)
+    return " ".join(normalized)
+
+
+def _is_tokenize_fallback_enabled() -> bool:
+    """Determine whether tokenization fallback should be attempted."""
+
+    try:
+        return config.load_config().tokenize_fallback
+    except ValueError:
+        return config.load_config_permissive().tokenize_fallback
+
+
 def chat_completion(client, **kwargs):
     """OpenAI chat completion with enhanced cost tracking."""
+
     model = kwargs.get("model")
     messages = kwargs.get("messages", [])
-    
-    # Extract prompt text for token counting
-    prompt_text = ""
-    if messages:
-        normalized = []
-        for msg in messages:
-            if not isinstance(msg, dict):
-                continue
-            content = msg.get("content")
-            text = _normalize_message_content(content)
-            if text:
-                normalized.append(text)
-        prompt_text = " ".join(normalized)
-    
+
+    tokenize_fallback_enabled = _is_tokenize_fallback_enabled()
+    prompt_for_span = None
+    if tokenize_fallback_enabled and messages:
+        prompt_for_span = _build_prompt_text(list(messages))
+
     usage: dict = {}
     vendor = get_model_vendor(model) if model else "openai"
-    
+
     with middleware.llm_call(
         model=model,
         vendor=vendor,
         usage=usage,
-        prompt=prompt_text
+        prompt=prompt_for_span,
     ):
         response = client.chat.completions.create(**kwargs)
         resp_usage = getattr(response, "usage", {}) or {}
@@ -109,18 +123,14 @@ def chat_completion(client, **kwargs):
             resp_usage = resp_usage.model_dump()
         usage.update(resp_usage)
 
-        # If TOKENIZE_FALLBACK is enabled and usage data is missing, calculate tokens
-        try:
-            tokenize_fallback_enabled = config.load_config().tokenize_fallback
-        except ValueError:
-            val = os.getenv("TOKENIZE_FALLBACK")
-            tokenize_fallback_enabled = bool(val and val.lower() in {"1", "true", "yes", "on"})
-
         if tokenize_fallback_enabled:
-            if not usage.get("prompt_tokens") and prompt_text:
-                usage["prompt_tokens"] = count_tokens(prompt_text, model, vendor)
+            if not usage.get("prompt_tokens") and messages:
+                prompt_text = prompt_for_span or _build_prompt_text(list(messages))
+                if prompt_text:
+                    usage["prompt_tokens"] = count_tokens(prompt_text, model, vendor)
             if not usage.get("completion_tokens") and response.choices:
                 completion_text = response.choices[0].message.content or ""
-                usage["completion_tokens"] = count_tokens(completion_text, model, vendor)
-        
+                if completion_text:
+                    usage["completion_tokens"] = count_tokens(completion_text, model, vendor)
+
         return response

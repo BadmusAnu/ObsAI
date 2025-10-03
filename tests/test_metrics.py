@@ -1,17 +1,11 @@
 """Test enhanced metrics functionality."""
 
-import time
-from unittest.mock import patch
-
 from ai_cost_sdk.metrics import (
     LLM_REQUESTS, LLM_TOKENS, AGENT_REQUESTS, AGENT_COST,
     LLM_COST_PER_REQUEST, AGENT_COST_PER_REQUEST, LLM_LATENCY,
     RAG_LATENCY, TOOL_LATENCY, LLM_THROUGHPUT, AGENT_THROUGHPUT,
     LLM_ERRORS, AGENT_ERRORS, ACTIVE_REQUESTS, QUEUE_SIZE
 )
-from ai_cost_sdk.middleware import agent_turn, llm_call, rag_embed, tool_call
-
-
 def test_llm_metrics():
     """Test LLM-specific metrics."""
     # Test request counting
