@@ -65,6 +65,67 @@ class Client:
     chat = _Chat()
 
 
+class _ChatCompletionsNoUsage:
+    def __init__(self):
+        self.last_kwargs: dict | None = None
+
+    def create(self, **kwargs):
+        self.last_kwargs = kwargs
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="hello"))],
+            usage={},
+        )
+
+
+class _StructuredChatCompletions:
+    def __init__(self):
+        self.last_kwargs: dict | None = None
+
+    def create(self, **kwargs):
+        self.last_kwargs = kwargs
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message={
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": "Here is the summary."},
+                            {"type": "text", "text": "Let me call a tool."},
+                        ],
+                        "tool_calls": [
+                            {
+                                "type": "function",
+                                "function": {
+                                    "name": "lookup",
+                                    "arguments": "{\"query\": \"value\"}",
+                                },
+                            }
+                        ],
+                    }
+                )
+            ],
+            usage={},
+        )
+
+
+
+def test_openai_wrapper_sets_attrs():
+    TEST_EXPORTER.clear()
+    _EXPORTER.clear()
+
+    client = Client()
+    with agent_turn("t1", "r1"):
+        chat_completion(
+            client, model="gpt-4o", messages=[{"role": "user", "content": "hi"}]
+        )
+
+    spans = _finished_spans()
+    llm = [s for s in spans if s.name == "llm.call"][0]
+    assert llm.attributes["ai.tokens.input"] == 5
+    assert llm.attributes["ai.tokens.output"] == 7
+    assert llm.attributes["cost.usd.total"] > 0
+
+
 
 def test_openai_wrapper_sets_attrs():
     TEST_EXPORTER.clear()
@@ -182,6 +243,64 @@ def test_openai_wrapper_handles_model_dump_usage():
     assert llm.attributes["ai.tokens.input"] == 11
     assert llm.attributes["ai.tokens.output"] == 13
 
+
+
+def test_openai_wrapper_preserves_generator_messages(monkeypatch):
+    exporter = InMemorySpanExporter()
+    _configure_tracer(exporter)
+
+    monkeypatch.setenv("TOKENIZE_FALLBACK", "1")
+
+    completions = _ChatCompletionsNoUsage()
+
+    class _GeneratorClient:
+        chat = SimpleNamespace(completions=completions)
+
+    def _message_generator():
+        for payload in [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "How can I help?"},
+        ]:
+            yield payload
+
+    with agent_turn("t1", "r1"):
+        chat_completion(
+            _GeneratorClient(),
+            model="gpt-4o",
+            messages=_message_generator(),
+        )
+
+    assert completions.last_kwargs is not None
+    recorded_messages = completions.last_kwargs["messages"]
+    assert isinstance(recorded_messages, list)
+    assert len(recorded_messages) == 2
+
+    spans = exporter.get_finished_spans()
+    llm = [s for s in spans if s.name == "llm.call"][0]
+    assert llm.attributes["ai.tokens.input"] > 0
+
+
+def test_openai_wrapper_tokenizes_structured_completion(monkeypatch):
+    exporter = InMemorySpanExporter()
+    _configure_tracer(exporter)
+
+    monkeypatch.setenv("TOKENIZE_FALLBACK", "1")
+
+    completions = _StructuredChatCompletions()
+
+    class _StructuredClient:
+        chat = SimpleNamespace(completions=completions)
+
+    with agent_turn("t1", "r1"):
+        chat_completion(
+            _StructuredClient(),
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "Summarize"}],
+        )
+
+    spans = exporter.get_finished_spans()
+    llm = [s for s in spans if s.name == "llm.call"][0]
+    assert llm.attributes["ai.tokens.output"] > 0
 
 
 def test_rag_wrapper_embed():
